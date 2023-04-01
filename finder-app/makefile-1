@@ -1,0 +1,11 @@
+#Makefile
+
+#FOO ?= default
+
+all:
+    # Check if FOO is defined
+    ifdef FOO
+		@echo "FOO is defined: $(FOO)"
+    else
+		@echo "FOO is not defined"
+    endif
