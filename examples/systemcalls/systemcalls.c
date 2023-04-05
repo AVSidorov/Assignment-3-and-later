@@ -1,5 +1,13 @@
 #include "systemcalls.h"
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+
 
 /**
  * @param cmd the command to execute with system()
@@ -51,9 +59,7 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
+    va_end(args);
 
 /*
  * TODO:
@@ -64,8 +70,33 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    int status;
+    pid_t pid;
 
-    va_end(args);
+    pid = fork();
+    if (pid == -1){
+        perror("fork");
+        return false;
+    }
+    if (!pid){
+        int ret;
+        ret = execv(command[0], command);
+        if (ret == -1) {
+            perror ("execv");
+            exit (EXIT_FAILURE);
+        }
+    }
+
+    pid = waitpid (pid, &status, 0);
+    if (pid == -1){
+        perror ("wait");
+        return false;
+    }
+
+    if (WEXITSTATUS(status) != EXIT_SUCCESS){
+        perror("exit status");
+        return false;
+    }
 
     return true;
 }
@@ -86,10 +117,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
+    va_end(args);
 
 /*
  * TODO
@@ -99,7 +127,44 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
-    va_end(args);
+
+    int status;
+    pid_t pid;
+
+    fflush(stdout);
+    pid = fork();
+    if (pid == -1){
+        perror("fork");
+        return false;
+    }
+    if (!pid){
+        int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT,0644);
+        if (fd < 0) {
+           perror("open");
+            exit(EXIT_FAILURE);
+        }
+        if (dup2(fd, 1) < 0){
+            perror("dup");
+            exit(EXIT_FAILURE);
+        }
+
+        int ret = execv(command[0], command);
+        if (ret == -1) {
+            perror ("execv");
+            exit (EXIT_FAILURE);
+        }
+    }
+
+    pid = waitpid (pid, &status, 0);
+    if (pid == -1){
+        perror ("wait");
+        return false;
+    }
+
+    if (WEXITSTATUS(status) != EXIT_SUCCESS){
+        perror("exit status");
+        return false;
+    }
 
     return true;
 }
