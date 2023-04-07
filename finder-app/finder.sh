@@ -16,7 +16,7 @@ then
     echo "${filesdir} not a dir or not exist"
     exit 1
 else
-  out=$(grep -F --count -h -r $searchstr $filesdir/* 2> /dev/null)
+  out=$(grep -F -c -h -r $searchstr $filesdir/* 2> /dev/null)
   #nfile=$(grep -F --count -h -r $searchstr $filesdir/* 2> /dev/null | wc -l)
 
   nline=0
