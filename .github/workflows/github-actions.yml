@@ -19,7 +19,7 @@ jobs:
         container:
           image: cuaesd/aesd-autotest:assignment3
           volumes:
-            -/home/sid/:/home/sid/
+            - /home/sid/:/home/sid/
         runs-on: self-hosted
         steps:
           - uses: actions/checkout@v2
