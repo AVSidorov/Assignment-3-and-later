@@ -30,7 +30,7 @@ cd "$OUTDIR"
 #	git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION}
 #fi
 
-if [ $? -eq 0 ]; then
+if [ ! -d "${OUTDIR}/linux-stable" ]; then
 	echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
 	echo "USE LOCAL PATCHED"
   git clone /home/sid/Work/AELD/image/linux-stable/ ${OUTDIR}/linux-stable/
