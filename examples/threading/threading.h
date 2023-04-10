@@ -8,6 +8,9 @@
  * the joiner thread.
  */
 struct thread_data{
+    pthread_mutex_t* mutex;
+    int wait_to_obtain_ms;
+    int wait_to_release_ms;
     /*
      * TODO: add other values your thread will need to manage
      * into this structure, use this structure to communicate
