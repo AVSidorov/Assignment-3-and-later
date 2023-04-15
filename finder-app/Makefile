@@ -9,7 +9,9 @@ EXECUTABLE=writer
 
 CROSS_COMPILE=
      
-all: $(SOURCES)  $(OBJECTS)
+all: writer
+
+writer: $(SOURCES)  $(OBJECTS)
 
 $(EXECUTABLE): $(OBJECTS)
 	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(OBJECTS) -o $@
