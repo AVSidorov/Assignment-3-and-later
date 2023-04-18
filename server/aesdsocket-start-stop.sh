@@ -1,4 +1,3 @@
-#!/bin/bash
 #!/bin/sh
 #
 # chkconfig: 345 99 01
@@ -26,7 +25,7 @@ SCRIPTNAME=/etc/init.d/S99$NAME
 
 d_start() {
         echo "Starting $DESC"
-        start-stop-daemon -S -b -n $NAME -a $DAEMON_DAEMON_PATH -- ${DAEMONOPTS}
+        start-stop-daemon -S -b -n $NAME -a $DAEMON_PATH -- $DAEMONOPTS
 }
 
 d_stop() {
