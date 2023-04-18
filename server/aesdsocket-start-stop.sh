@@ -22,7 +22,7 @@ PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/S99$NAME
 
 # Check if the daemon is there.
-test -x $DAEMON || exit 0
+#test -x $DAEMON || exit 0
 
 d_start() {
         echo "Starting $DESC"
