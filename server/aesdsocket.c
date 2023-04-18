@@ -20,13 +20,21 @@ static volatile int file_fd = -1, server_fd = -1, client_fd = -1;
 void signal_handler(int sig)
 {
     if (file_fd >= 0)
-        close(file_fd);
+        if (close(file_fd))
+            syslog(LOG_ERR, "%s: %m", "Close file");
 
-    if (client_fd >= 0)
-        close(client_fd);
+
+    if (client_fd >= 0){
+        if (shutdown(client_fd, SHUT_RDWR))
+           syslog(LOG_ERR, "%s: %m", "Shutdown connection");
+        if (close(client_fd))
+            syslog(LOG_ERR, "%s: %m", "Close socket descriptor");
+    }
+
 
     if (server_fd >= 0)
-        close(server_fd);
+        if (close(server_fd))
+            syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
      if (unlink(FILENAME))
         syslog(LOG_ERR, "%s: %m", "Error delete file");
@@ -63,13 +71,7 @@ int main(int argc, char * argv[]){
         return -1;
     }
 
-    // Set socket options to reuse address and enable keepalive
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_KEEPALIVE, &opt, sizeof(opt)) == -1)
-    {
-        log_error("Failed to set socket options");
-        close(server_fd);
-        return -1;
-    }
+
 
 
     // Set the server address
@@ -77,6 +79,14 @@ int main(int argc, char * argv[]){
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
+
+    // Set socket options to reuse address and enable keepalive
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
+    {
+        log_error("Failed to set socket options");
+        close(server_fd);
+        return -1;
+    }
 
     // Bind socket to port
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
@@ -86,6 +96,8 @@ int main(int argc, char * argv[]){
         return -1;
     }
 
+
+
     if (argc>1){
         if (strcmp(argv[1], "-d") == 0){
             int pid = fork();
@@ -94,8 +106,10 @@ int main(int argc, char * argv[]){
                 close(server_fd);
                 return -1;
             }
-            else if (pid != 0)
+            else if (pid != 0){
+                close(server_fd);
                 exit(EXIT_SUCCESS);
+            }
 
             // Daemon section
             if (pid == 0){
