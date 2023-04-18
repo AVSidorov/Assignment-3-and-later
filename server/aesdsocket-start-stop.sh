@@ -26,7 +26,7 @@ test -x $DAEMON || exit 0
 
 d_start() {
         echo "Starting $DESC"
-        start-stop-daemon --start --background -n $NAME -a $DAEMON_DAEMON_PATH ${DAEMON_PATH} -- ${DAEMONOPTS}
+        start-stop-daemon -S -b -n $NAME -a $DAEMON_DAEMON_PATH -- ${DAEMONOPTS}
 }
 
 d_stop() {
