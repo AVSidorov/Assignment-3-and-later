@@ -1,13 +1,6 @@
 #!/bin/sh
 #
-# chkconfig: 345 99 01
-# description: My program daemon
-#
-# processname: my_program
-# pidfile: /var/run/my_program.pid
 
-# Source function library.
-#. /etc/rc.d/init.d/functions
 
 # Variables
 DAEMON="aesdsocket"
@@ -20,8 +13,6 @@ DESC="Simple socket server"
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/S99$NAME
 
-# Check if the daemon is there.
-#test -x $DAEMON || exit 0
 
 d_start() {
         echo "Starting $DESC"
