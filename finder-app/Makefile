@@ -1,19 +1,18 @@
 CC = gcc
-CFLAGS=
+CFLAGS= -Wall -Werror
 LDFLAGS=
-
+CROSS_COMPILE=
+INCLUDE=
 
 SOURCES=writer.c
 OBJECTS=$(SOURCES:.c=.o)
-EXECUTABLE=writer
+TARGET=writer
 
 CROSS_COMPILE=
      
-all: writer
+all: $(TARGET) $(OBJECTS)
 
-writer: $(SOURCES)  $(OBJECTS)
-
-$(EXECUTABLE): $(OBJECTS)
+$(TARGET): $(OBJECTS)
 	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
 $(OBJECTS): $(SOURCES)
@@ -21,4 +20,4 @@ $(OBJECTS): $(SOURCES)
 
 
 clean:
-	rm -f writer writer.o
+	rm -f $(TARGET) $(OBJECTS)

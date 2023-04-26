@@ -1,22 +1,26 @@
+# TODO
+# modify for Yocto
+# exmp CC ?= $(CROSS_COMPILE)$(CC)
 CC = gcc
 CFLAGS= -Wall -Werror
 LDFLAGS=
 CROSS_COMPILE=
+INCLUDE= -lpthread -lrt
 
-EXECUTABLE=aesdsocket
+
+TARGET=aesdsocket
 SOURCES=aesdsocket.c
 OBJECTS=$(SOURCES:.c=.o)
 
 
-     
-all: $(EXECUTABLE) $(OBJECTS)
+all: $(TARGET) $(OBJECTS)
 
-$(EXECUTABLE): $(OBJECTS)
-	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+$(TARGET): $(OBJECTS)
+	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(INCLUDE) $(OBJECTS) -o $@
 
 $(OBJECTS): $(SOURCES)
 	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $<
 
 
 clean:
-	rm -f $(EXECUTABLE) $(OBJECTS)
+	rm -f $(TARGET) $(OBJECTS)
