@@ -67,6 +67,8 @@ void timer_handler(int sig){
     // pthread_mutex_lock(&lock); is unnecessary here. write is signal and thread safe due to POSIX.
     // TODO check error and partial write
     write(file_fd, &time_str, strlen(time_str));
+    if (fsync(file_fd) < 0)
+        syslog(LOG_ERR, "%s: %m", "Error sync timestamp to disk");
     // pthread_mutex_unlock(&lock);
 }
 
@@ -80,14 +82,20 @@ void log_error(const char* message) {
 }
 
 void cleanup_main(void){
-    if (close(server_fd))
+   // if (shutdown(server_fd, SHUT_RDWR) == -1)
+   //     log_error("Error Shutdown main socket");
+
+    if (close(server_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    if (close(file_fd))
+    if (fsync(file_fd) < 0)
+        syslog(LOG_ERR, "%s: %m", "Error sync to disk before close");
+
+    if (close(file_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close file");
 
-    if (unlink(FILENAME))
-        syslog(LOG_ERR, "%s: %m", "Error delete file");
+//    if (unlink(FILENAME))
+//        syslog(LOG_ERR, "%s: %m", "Error delete file");
 
     pthread_mutex_destroy(&lock);
 }
@@ -101,7 +109,7 @@ void cleanup_threads(void){
         if(node == NULL)
             break;
         if (node->clt->state == 1){
-            if (pthread_join(node -> clt -> thr_id, NULL) !=0)
+            if (pthread_join(node -> clt -> thr_id, NULL) != 0)
                 log_error("Error join thread");
 
             SLIST_REMOVE(&head, node, clt_lst_s, next);
@@ -167,6 +175,9 @@ void *process_connection(void *thread_data){
             goto clean_thread;
         }
 
+        // ensure that data on disk
+        if (fsync(file_fd) < 0)
+            syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
 
         // Sending answer
         if (lseek(file_fd, (off_t) 0, SEEK_SET) != (off_t)  0){
@@ -190,7 +201,6 @@ void *process_connection(void *thread_data){
             log_error("Error read from file");
             goto clean_thread;
         }
-        sync();
         memset(&buffer, 0, BUF_SIZE);
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
@@ -205,7 +215,7 @@ void *process_connection(void *thread_data){
     }
 
     // close client socket
-    if (close(client_fd))
+    if (close(client_fd) == -1)
         log_error("Error Close socket descriptor");
 
     // mark thread as finished
@@ -261,9 +271,6 @@ void accept_connection(int sig){
     pthread_t thread; // for storing thr_id
 
 
-    sigset_t old_set;
-    sigemptyset(&old_set);
-    sigprocmask(SIG_BLOCK, &block_set, &old_set);
     pthread_mutex_lock(&lock);
 
     if (pthread_create( &thread, NULL, process_connection, (void*) data) !=0){
@@ -275,7 +282,6 @@ void accept_connection(int sig){
     SLIST_INSERT_HEAD(&head, node, next);
 
     pthread_mutex_unlock(&lock);
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
 
 }
 
@@ -301,15 +307,16 @@ int main(int argc, char * argv[]){
     sigaddset(&block_set, SIGTERM);
 
 
+
     // Open file for timestamps and data
-    file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND, 0644);
+    file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
     if (file_fd < 0) {
         log_error("Failed to open data file");
         goto cleanup_thr;
     }
 
      // Set up the signal handler using sigaction
-    struct sigaction sa_int, sa_term,sa_alrm;
+    struct sigaction sa_int, sa_term,sa_alrm, sa_io;
 
     sa_int.sa_handler = signal_handler;
     sigemptyset(&sa_int.sa_mask);
@@ -331,7 +338,15 @@ int main(int argc, char * argv[]){
     sigaddset(&sa_alrm.sa_mask, SIGINT);
     sa_alrm.sa_flags = 0;
     sigaction(SIGALRM, &sa_alrm, NULL);
+    
+    sa_io.sa_handler = accept_connection;
+    sigemptyset(&sa_io.sa_mask);
+    sigaddset(&sa_io.sa_mask, SIGTERM);
+    sigaddset(&sa_io.sa_mask, SIGINT);
+    sigaddset(&sa_io.sa_mask, SIGALRM);
 
+    sa_io.sa_flags = 0;
+    sigaction(SIGIO, &sa_io, NULL);
 
     raise(SIGALRM);
 
@@ -413,19 +428,10 @@ int main(int argc, char * argv[]){
         }
     }
 
-
-
-    // Listen for incoming connections
-    if (listen(server_fd, MAX_CLIENTS) == -1)
-    {
-        log_error("Failed to listen for incoming connections");
-        goto cleanup_server;
-    }
-
-
-    // Set the socket to non-blocking mode
-    if (fcntl(server_fd, F_SETFL, O_NONBLOCK | O_ASYNC) < 0) {
-        log_error("Error setting socket to non-blocking mode");
+    
+    // Set the socket to async mode
+    if (fcntl(server_fd, F_SETFL, O_ASYNC) < 0) {
+        log_error("Error setting socket to async mode");
         goto cleanup_server;
     }
 
@@ -434,6 +440,15 @@ int main(int argc, char * argv[]){
         log_error("Error enabling receipt of asynchronous I/O signals");
         goto cleanup_server;
     }
+    
+    // Listen for incoming connections
+    if (listen(server_fd, MAX_CLIENTS) == -1)
+    {
+        log_error("Failed to listen for incoming connections");
+        goto cleanup_server;
+    }
+
+
 
     /* Set timer*/
     struct itimerval timer;
@@ -452,28 +467,31 @@ int main(int argc, char * argv[]){
 
     SLIST_INIT(&head);
 
-    // bind SIGIO to handler for accepting connections
-    signal(SIGIO, accept_connection);
     while (running){
         // Accepting a new client connection is performed by SIGIO handling
         pause();
     }
 
+
     // wait ending of all threads(connections)
     while (!SLIST_EMPTY(&head))
         cleanup_threads();
+
+
     cleanup_main();
+
+    sleep(1);
 
     exit(EXIT_SUCCESS);
 
     /* Error section */
-    cleanup_server: if (close(server_fd))
+    cleanup_server: if (close(server_fd) == -1)
             syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    cleanup_file: if (close(file_fd))
+    cleanup_file: if (close(file_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close file");
 
-    if (unlink(FILENAME))
+    if (unlink(FILENAME) == -1)
         syslog(LOG_ERR, "%s: %m", "Error delete file");
 
     cleanup_thr: pthread_mutex_destroy(&lock);
