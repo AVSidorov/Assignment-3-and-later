@@ -480,8 +480,6 @@ int main(int argc, char * argv[]){
 
     cleanup_main();
 
-    sleep(1);
-
     exit(EXIT_SUCCESS);
 
     /* Error section */
