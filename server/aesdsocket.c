@@ -19,7 +19,10 @@
 #define KEEPALIVE 10
 
 static volatile int running = 1;
-static volatile int file_fd = -1, server_fd = -1;
+static volatile int server_fd = -1;
+
+FILE *file_fd;
+
 sigset_t block_set;
 pthread_mutex_t lock;
 
@@ -44,13 +47,12 @@ SLIST_HEAD(slisthead, clt_lst_s) head;
 * Signal handlers
 *
 *****************************************************/
-void signal_handler(int sig)
+void exit_handler(int sig)
 {
     running = 0;
-    if (sig == SIGINT || sig == SIGTERM){
-        syslog(LOG_DEBUG,"%s", "Caught signal, exiting");
-    }
+    syslog(LOG_DEBUG,"%s", "Caught signal, exiting");
 }
+
 void timer_handler(int sig){
     time_t current_time;
     struct tm *time_info;
@@ -64,12 +66,12 @@ void timer_handler(int sig){
     strftime(time_str, sizeof(time_str), "timestamp:%a, %d %b %Y %H:%M:%S %z\n", time_info);
 
     /* write to file */
-    // pthread_mutex_lock(&lock); is unnecessary here. write is signal and thread safe due to POSIX.
-    // TODO check error and partial write
-    write(file_fd, &time_str, strlen(time_str));
-    if (fsync(file_fd) < 0)
-        syslog(LOG_ERR, "%s: %m", "Error sync timestamp to disk");
-    // pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); // SIGIO should be blocked to avoid deadlock
+    if (fprintf(file_fd, "%s", time_str) < 0)
+        syslog(LOG_ERR, "%s: %m", "Error write timestamp");
+    fflush(file_fd);
+    usleep(1000);
+    pthread_mutex_unlock(&lock);
 }
 
 /*****************************************************
@@ -82,20 +84,12 @@ void log_error(const char* message) {
 }
 
 void cleanup_main(void){
-   // if (shutdown(server_fd, SHUT_RDWR) == -1)
-   //     log_error("Error Shutdown main socket");
-
+    /* Clean global variables*/
     if (close(server_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    if (fsync(file_fd) < 0)
-        syslog(LOG_ERR, "%s: %m", "Error sync to disk before close");
-
-    if (close(file_fd) == -1)
+    if (fclose(file_fd) !=0)
         syslog(LOG_ERR, "%s: %m", "Close file");
-
-//    if (unlink(FILENAME))
-//        syslog(LOG_ERR, "%s: %m", "Error delete file");
 
     pthread_mutex_destroy(&lock);
 }
@@ -145,18 +139,21 @@ void *process_connection(void *thread_data){
 
     // Exit from loop to label in case error or closed connection
     do{
-        while ( (bytes_read = recv(client_fd, buffer, BUF_SIZE, 0)) > 0) {
+        while ( (bytes_read = recv(client_fd, buffer, BUF_SIZE-1, 0)) > 0) {
             // Lock mutex and block signals if new packet
             if (!packet){
                 sigprocmask(SIG_BLOCK, &block_set, &old_set);
                 pthread_mutex_lock(&lock);
                 packet = 1;
             }
+            buffer[bytes_read] ='\0';
 
-            // Append the data to the file
-            // TODO check error and partial write
-            write(file_fd, &buffer, bytes_read);
-
+            if (fprintf(file_fd, "%s", buffer) < 0){
+                log_error("Error write recived data to file");
+                goto clean_thread;
+            }
+            //TODO check bytes written == bytes received
+            fflush(file_fd);
             // if full packet received go to response (send)
             if (buffer[bytes_read-1] == '\n'){
                 break;
@@ -175,29 +172,19 @@ void *process_connection(void *thread_data){
             goto clean_thread;
         }
 
-        // ensure that data on disk
-        if (fsync(file_fd) < 0)
-            syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
-
         // Sending answer
-        if (lseek(file_fd, (off_t) 0, SEEK_SET) != (off_t)  0){
-            log_error("Fail to seek to file start");
-            goto clean_thread;
-        }
+
+        rewind(file_fd);
 
         int bytes_send;
-        while ((bytes_read = read(file_fd, &buffer, BUF_SIZE)) > 0){
+        while ((bytes_read = fread(buffer, sizeof(*buffer),BUF_SIZE, file_fd)) > 0){
             // TODO check error and partial send
             if ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
                 log_error("Fail send");
                 goto clean_thread;
             }
-            /*else{
-                buffer[bytes_send] = '\0';
-                //syslog(LOG_DEBUG,"sent %s %d bytes to %d", buffer, bytes_send , client_fd);
-            }*/
         }
-        if (bytes_read == -1){
+        if (bytes_read != BUF_SIZE && feof(file_fd)==0){
             log_error("Error read from file");
             goto clean_thread;
         }
@@ -209,7 +196,7 @@ void *process_connection(void *thread_data){
 
     // unlock mutex and unblock signals
     clean_thread: if (packet){
-        lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
+        fseek(file_fd, 0, SEEK_END); // try to seek to end of file here error check have no sense
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
     }
@@ -309,8 +296,8 @@ int main(int argc, char * argv[]){
 
 
     // Open file for timestamps and data
-    file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
-    if (file_fd < 0) {
+    file_fd = fopen(FILENAME, "w+");
+    if (file_fd == NULL) {
         log_error("Failed to open data file");
         goto cleanup_thr;
     }
@@ -318,33 +305,33 @@ int main(int argc, char * argv[]){
      // Set up the signal handler using sigaction
     struct sigaction sa_int, sa_term,sa_alrm, sa_io;
 
-    sa_int.sa_handler = signal_handler;
+    sa_int.sa_handler = exit_handler;
     sigemptyset(&sa_int.sa_mask);
-    sigaddset(&sa_int.sa_mask, SIGALRM);
-    sigaddset(&sa_int.sa_mask, SIGTERM);
+//    sigaddset(&sa_int.sa_mask, SIGALRM);
+//    sigaddset(&sa_int.sa_mask, SIGTERM);
     sa_int.sa_flags = 0;
     sigaction(SIGINT, &sa_int, NULL);
 
-    sa_term.sa_handler = signal_handler;
+    sa_term.sa_handler = exit_handler;
     sigemptyset(&sa_term.sa_mask);
-    sigaddset(&sa_term.sa_mask, SIGALRM);
-    sigaddset(&sa_term.sa_mask, SIGINT);
+//    sigaddset(&sa_term.sa_mask, SIGALRM);
+//    sigaddset(&sa_term.sa_mask, SIGINT);
     sa_term.sa_flags = 0;
     sigaction(SIGTERM, &sa_term, NULL);
 
     sa_alrm.sa_handler = timer_handler;
     sigemptyset(&sa_alrm.sa_mask);
-    sigaddset(&sa_alrm.sa_mask, SIGTERM);
-    sigaddset(&sa_alrm.sa_mask, SIGINT);
+//    sigaddset(&sa_alrm.sa_mask, SIGTERM);
+//    sigaddset(&sa_alrm.sa_mask, SIGINT);
+    sigaddset(&sa_alrm.sa_mask, SIGIO);
     sa_alrm.sa_flags = 0;
     sigaction(SIGALRM, &sa_alrm, NULL);
     
     sa_io.sa_handler = accept_connection;
     sigemptyset(&sa_io.sa_mask);
-    sigaddset(&sa_io.sa_mask, SIGTERM);
-    sigaddset(&sa_io.sa_mask, SIGINT);
+//    sigaddset(&sa_io.sa_mask, SIGTERM);
+//    sigaddset(&sa_io.sa_mask, SIGINT);
     sigaddset(&sa_io.sa_mask, SIGALRM);
-
     sa_io.sa_flags = 0;
     sigaction(SIGIO, &sa_io, NULL);
 
@@ -418,8 +405,7 @@ int main(int argc, char * argv[]){
 
                 // redirect stdout stdin stderr
                 for (int i=0; i<3; i++)
-                    if (i != file_fd)
-                        close(i);
+                    close(i);
                 open("/dev/null", O_RDWR);
                 dup(0);
                 dup(0);
@@ -486,11 +472,8 @@ int main(int argc, char * argv[]){
     cleanup_server: if (close(server_fd) == -1)
             syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    cleanup_file: if (close(file_fd) == -1)
+    cleanup_file: if (fclose(file_fd) != 0)
         syslog(LOG_ERR, "%s: %m", "Close file");
-
-    if (unlink(FILENAME) == -1)
-        syslog(LOG_ERR, "%s: %m", "Error delete file");
 
     cleanup_thr: pthread_mutex_destroy(&lock);
 
