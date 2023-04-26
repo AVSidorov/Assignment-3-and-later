@@ -79,13 +79,6 @@ void log_error(const char* message) {
     syslog(LOG_ERR, "%s: %m", message);
 }
 
-void cleanup_client(int client_fd){
-   if (shutdown(client_fd, SHUT_RDWR))
-        log_error("Error Shutdown connection");
-    if (close(client_fd))
-        log_error("Error Close socket descriptor");
-}
-
 void cleanup_main(void){
     if (close(server_fd))
         syslog(LOG_ERR, "%s: %m", "Close server descriptor");
@@ -100,29 +93,21 @@ void cleanup_main(void){
 }
 
 void cleanup_threads(void){
-    /*
-    * TODO cleanup with removing elements, which also finished
-    * But this is not necessary because in list we have only pointers.
-    * memory from used structures will be freed
-    */
 
-    /* Cleanup finished threads without removing from list */
     clt_lst_t *node=NULL;
+    clt_lst_t *tnode=NULL;
 
-    while (!SLIST_EMPTY(&head)) {
-        node = SLIST_FIRST(&head);
-        printf(" thread: %ld state is %d\n", node->clt->thr_id, node->clt->state);
-        if (node->clt->state == 0){
-            cleanup_client(node->clt->client_fd);
-            if (pthread_cancel(node->clt->thr_id) !=0)
-                log_error("Error cancel thread()");
+    SLIST_FOREACH_SAFE(node, &head, next, tnode) {
+        if(node == NULL)
+            break;
+        if (node->clt->state == 1){
+            if (pthread_join(node -> clt -> thr_id, NULL) !=0)
+                log_error("Error join thread");
+
+            SLIST_REMOVE(&head, node, clt_lst_s, next);
+            free(node -> clt);
+            free(node);
         }
-        if (pthread_join(node -> clt -> thr_id, NULL) !=0)
-              log_error("Error join thread");
-
-        SLIST_REMOVE_HEAD(&head, next);
-        free(node -> clt);
-        free(node);
     }
 
 }
@@ -150,55 +135,79 @@ void *process_connection(void *thread_data){
     int packet = 0;
     ssize_t bytes_read=0;
 
-    while ( (bytes_read = recv(client_fd, buffer, BUF_SIZE, 0)) > 0) {
+    // Exit from loop to label in case error or closed connection
+    do{
+        while ( (bytes_read = recv(client_fd, buffer, BUF_SIZE, 0)) > 0) {
+            // Lock mutex and block signals if new packet
+            if (!packet){
+                sigprocmask(SIG_BLOCK, &block_set, &old_set);
+                pthread_mutex_lock(&lock);
+                packet = 1;
+            }
+
+            // Append the data to the file
+            // TODO check error and partial write
+            write(file_fd, &buffer, bytes_read);
+
+            // if full packet received go to response (send)
+            if (buffer[bytes_read-1] == '\n'){
+                break;
+            }
+        }
+
+        // Error read from socket
         if (bytes_read == -1){
-            log_error("recv");
+            log_error("Error recv");
             goto clean_thread;
         }
 
-        if (!running && !packet)
-            goto clean_thread;
-
-        // Lock mutex and block signals if new packet
-        if (!packet){
-            sigprocmask(SIG_BLOCK, &block_set, &old_set);
-            pthread_mutex_lock(&lock);
-            packet = 1;
-        }
-
-        // Append the data to the file
-        // TODO check error and partial write
-        write(file_fd, &buffer, bytes_read);
-
-        // if full packet received go to response (send)
-        if (buffer[bytes_read-1] == '\n'){
-            break;
-        }
-    }
-
-    // Sending answer
-    if (lseek(file_fd, (off_t) 0, SEEK_SET) != (off_t)  0){
-        log_error("Fail to seek to file start");
-        goto clean_thread;
-    }
-
-    int bytes_send;
-    while ((bytes_read = read(file_fd, &buffer, BUF_SIZE)) > 0){
-        // TODO check error and partial send
-        while ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
-            log_error("Fail send");
+        // connection closed by client
+        if (bytes_read == 0){
+            syslog(LOG_DEBUG,"%s", "Connection closed by client");
             goto clean_thread;
         }
-    }
 
-    clean_thread: lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
+
+        // Sending answer
+        if (lseek(file_fd, (off_t) 0, SEEK_SET) != (off_t)  0){
+            log_error("Fail to seek to file start");
+            goto clean_thread;
+        }
+
+        int bytes_send;
+        while ((bytes_read = read(file_fd, &buffer, BUF_SIZE)) > 0){
+            // TODO check error and partial send
+            if ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
+                log_error("Fail send");
+                goto clean_thread;
+            }
+            /*else{
+                buffer[bytes_send] = '\0';
+                //syslog(LOG_DEBUG,"sent %s %d bytes to %d", buffer, bytes_send , client_fd);
+            }*/
+        }
+        if (bytes_read == -1){
+            log_error("Error read from file");
+            goto clean_thread;
+        }
+        sync();
+        memset(&buffer, 0, BUF_SIZE);
+        pthread_mutex_unlock(&lock);
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+        packet = 0;
+    }while(1);
+
     // unlock mutex and unblock signals
-    if (packet){
+    clean_thread: if (packet){
+        lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
     }
-    // close connection and client socket
-    cleanup_client(client_fd);
+
+    // close client socket
+    if (close(client_fd))
+        log_error("Error Close socket descriptor");
+
     // mark thread as finished
     data -> state = 1;
 
@@ -250,14 +259,23 @@ void accept_connection(int sig){
 
     // Create thread
     pthread_t thread; // for storing thr_id
+
+
+    sigset_t old_set;
+    sigemptyset(&old_set);
+    sigprocmask(SIG_BLOCK, &block_set, &old_set);
+    pthread_mutex_lock(&lock);
+
     if (pthread_create( &thread, NULL, process_connection, (void*) data) !=0){
         log_error("Error create new thread");
-        return;
     }
 
     /* add thread to list*/
-
+    cleanup_threads();
     SLIST_INSERT_HEAD(&head, node, next);
+
+    pthread_mutex_unlock(&lock);
+    sigprocmask(SIG_SETMASK, &old_set, NULL);
 
 }
 
@@ -441,8 +459,9 @@ int main(int argc, char * argv[]){
         pause();
     }
 
-
-    cleanup_threads();
+    // wait ending of all threads(connections)
+    while (!SLIST_EMPTY(&head))
+        cleanup_threads();
     cleanup_main();
 
     exit(EXIT_SUCCESS);
