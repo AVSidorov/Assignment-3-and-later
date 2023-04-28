@@ -222,6 +222,7 @@ void *process_connection(void *thread_data){
     data -> state = 1;
 
     //pthread_exit(NULL);
+    return NULL;
 }
 
 void accept_connection(void){
