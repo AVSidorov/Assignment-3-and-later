@@ -17,7 +17,6 @@
 #define BUF_SIZE 1024
 #define FILENAME "/var/tmp/aesdsocketdata"
 #define KEEPALIVE 10
-#define ACKTIMEOUT 1000
 
 static volatile int running = 1;
 static volatile int wait_connection = 0;
@@ -45,11 +44,6 @@ SLIST_HEAD(slisthead, clt_lst_s) head;
 * Service Functions
 *
 *****************************************************/
-void log_error(const char* message) {
-    syslog(LOG_ERR, "%s: %m", message);
-}
-
-
 void cleanup_threads(void){
 
     clt_lst_t *node=NULL;
@@ -60,7 +54,7 @@ void cleanup_threads(void){
             break;
         if (node->clt->state == 1){
             if (pthread_join(node -> clt -> thr_id, NULL) != 0)
-                log_error("Error join thread");
+                syslog(LOG_ERR, "%s: %m", "Error join thread");
 
             SLIST_REMOVE(&head, node, clt_lst_s, next);
             free(node -> clt);
@@ -93,6 +87,7 @@ void exit_norm(void){
 * Signal handlers
 *
 *****************************************************/
+
 void exit_handler(int sig)
 {
     running = 0;
@@ -103,6 +98,7 @@ void exit_handler(int sig)
     syslog(LOG_DEBUG,"%s", "Caught signal, exiting");
 
 }
+
 void timer_handler(int sig){
     time_t current_time;
     struct tm *time_info;
@@ -120,9 +116,6 @@ void timer_handler(int sig){
     // and SIGALRM is blocked during packet processing
     // TODO check error and partial write
     write(file_fd, &time_str, strlen(time_str));
-    if (fsync(file_fd) < 0)
-        syslog(LOG_ERR, "%s: %m", "Error sync timestamp to disk");
-    // pthread_mutex_unlock(&lock);
 }
 
 /*****************************************************
@@ -140,15 +133,6 @@ void *process_connection(void *thread_data){
     // prepare buffer
     char buffer[BUF_SIZE];
     memset(&buffer, 0, BUF_SIZE);
-    /*// dynamical buffer
-    char *buf=malloc(BUF_SIZE);
-
-    if (buf == NULL){
-        log_error("Error allocate dynamical buf");
-        goto clean_thread;
-    }
-    memset(&buf, 0, BUF_SIZE);
-    char *end=buf;*/
 
     sigset_t old_set;
     sigemptyset(&old_set);
@@ -174,7 +158,6 @@ void *process_connection(void *thread_data){
             // ensure that data on disk
             if (fsync(file_fd) < 0)
                 syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
-            //usleep(ACKTIMEOUT);
 
             syslog(LOG_DEBUG,"received %ld bytes", bytes_read);
             syslog(LOG_DEBUG,"received %s", buffer);
@@ -187,7 +170,7 @@ void *process_connection(void *thread_data){
 
         // Error read from socket
         if (bytes_read == -1){
-            log_error("Error recv");
+            syslog(LOG_ERR, "%s: %m", "Error recv");
             goto clean_thread;
         }
 
@@ -206,7 +189,7 @@ void *process_connection(void *thread_data){
             file_pos += bytes_read;
             // TODO check error and partial send
             if ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
-                log_error("Fail send");
+                syslog(LOG_ERR, "%s: %m", "Fail send");
                 goto clean_thread;
             }
             syslog(LOG_DEBUG,"read  %ld bytes", bytes_read);
@@ -214,7 +197,7 @@ void *process_connection(void *thread_data){
         }
 
         if (bytes_read == -1){
-            log_error("Error read from file");
+            syslog(LOG_ERR, "%s: %m", "Error read from file");
             goto clean_thread;
         }
 
@@ -234,7 +217,7 @@ void *process_connection(void *thread_data){
 
     // close client socket
     if (close(client_fd) == -1)
-        log_error("Error Close socket descriptor");
+        syslog(LOG_ERR, "%s: %m", "Error Close socket descriptor");
 
     // mark thread as finished
     data -> state = 1;
@@ -253,14 +236,14 @@ void accept_connection(void){
 
     wait_connection = 1;
     if ((client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t*)&addr_len)) < 0) {
-        log_error("Accept failed");
+        syslog(LOG_ERR, "%s: %m", "Accept failed");
         return;
     }
     wait_connection = 0;
 
     // Log connection details to syslog
     if (!inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN)){
-        log_error("Error convert address");
+        syslog(LOG_ERR, "%s: %m", "Error convert address");
     }
     else
         syslog(LOG_DEBUG, "Accepted connection from %s:%d", client_ip,client_addr.sin_port);
@@ -271,7 +254,7 @@ void accept_connection(void){
     client_thr_t *data=NULL;
     data = malloc(sizeof(client_thr_t));
     if (data == NULL){
-        log_error("Error allocate memory for thread data");
+        syslog(LOG_ERR, "%s: %m", "Error allocate memory for thread data");
         return;
     }
 
@@ -283,7 +266,7 @@ void accept_connection(void){
     clt_lst_t *node=NULL;
     node = malloc(sizeof(clt_lst_t));
     if (node == NULL){
-        log_error("Error allocate memory for list node");
+        syslog(LOG_ERR, "%s: %m", "Error allocate memory for list node");
         return;
     }
     node -> clt = data;
@@ -291,17 +274,13 @@ void accept_connection(void){
     // Create thread
     pthread_t thread; // for storing thr_id
 
-    //pthread_mutex_lock(&lock);
-
     if (pthread_create( &thread, NULL, process_connection, (void*) data) !=0){
-        log_error("Error create new thread");
+        syslog(LOG_ERR, "%s: %m", "Error create new thread");
     }
 
     /* add thread to list*/
     cleanup_threads();
     SLIST_INSERT_HEAD(&head, node, next);
-
-    //pthread_mutex_unlock(&lock);
 
 }
 
@@ -317,7 +296,7 @@ int main(int argc, char * argv[]){
 
     // Create mutex
     if (pthread_mutex_init(&lock, NULL) !=0){
-        log_error("Error initialize mutex");
+        syslog(LOG_ERR, "%s: %m", "Error initialize mutex");
         goto err;
     };
 
@@ -332,7 +311,7 @@ int main(int argc, char * argv[]){
     // Open file for timestamps and data
     file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
     if (file_fd < 0) {
-        log_error("Failed to open data file");
+        syslog(LOG_ERR, "%s: %m", "Failed to open data file");
         goto cleanup_thr;
     }
 
@@ -359,26 +338,14 @@ int main(int argc, char * argv[]){
     sigaddset(&sa_alrm.sa_mask, SIGINT);
     sa_alrm.sa_flags = 0;
     sigaction(SIGALRM, &sa_alrm, NULL);
-    
-    /*
-    sa_io.sa_handler = accept_connection;
-    sigemptyset(&sa_io.sa_mask);
-    sigaddset(&sa_io.sa_mask, SIGTERM);
-    sigaddset(&sa_io.sa_mask, SIGINT);
-    sigaddset(&sa_io.sa_mask, SIGALRM);
-
-    sa_io.sa_flags = 0;
-    sigaction(SIGIO, &sa_io, NULL);
-    */
 
     /*
     *   Main socket section
     */
 
      // Create socket file descriptor
-    //if ((server_fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC, 0)) == -1){
     if ((server_fd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0)) == -1){
-        log_error("Failed to create socket");
+        syslog(LOG_ERR, "%s: %m", "Failed to create socket");
         goto cleanup_file;
     }
 
@@ -396,14 +363,14 @@ int main(int argc, char * argv[]){
     // Set socket options to reuse address and enable keepalive
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR|SO_KEEPALIVE, &opt, sizeof(opt)) == -1)
     {
-        log_error("Failed to set socket options");
+        syslog(LOG_ERR, "%s: %m", "Failed to set socket options");
         goto cleanup_server;
     }
 
     // Bind socket to port
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
     {
-        log_error("Bind failed");
+        syslog(LOG_ERR, "%s: %m", "Bind failed");
         goto cleanup_server;
     }
 
@@ -414,7 +381,7 @@ int main(int argc, char * argv[]){
             int pid = fork();
             // error fork
             if (pid == -1){
-                log_error("fork");
+                syslog(LOG_ERR, "%s: %m", "fork");
                 goto cleanup_server;
             }
             // parent
@@ -427,12 +394,12 @@ int main(int argc, char * argv[]){
             if (pid == 0){
 
                 if (setsid() == -1){
-                    log_error("Create new session");
+                    syslog(LOG_ERR, "%s: %m", "Error create new session");
                     goto cleanup_server;
                 }
 
                 if ( chdir("/") == -1){
-                    log_error("Chdir to /");
+                    syslog(LOG_ERR, "%s: %m", "Error chdir to /");
                     goto cleanup_server;
                 }
 
@@ -448,27 +415,12 @@ int main(int argc, char * argv[]){
         }
     }
 
-    /* Async mode works bad, when SIGIO are combined
-    // Set the socket to async mode
-    if (fcntl(server_fd, F_SETFL, O_ASYNC) < 0) {
-        log_error("Error setting socket to async mode");
-        goto cleanup_server;
-    }
-
-    // Enable the receipt of asynchronous I/O signals
-    if (fcntl(server_fd, F_SETOWN, getpid()) < 0) {
-        log_error("Error enabling receipt of asynchronous I/O signals");
-        goto cleanup_server;
-    }
-    */
-
     // Listen for incoming connections
     if (listen(server_fd, MAX_CLIENTS) == -1)
     {
-        log_error("Failed to listen for incoming connections");
+        syslog(LOG_ERR, "%s: %m", "Failed to listen for incoming connections");
         goto cleanup_server;
     }
-
 
 
     /* Set timer*/
@@ -479,7 +431,7 @@ int main(int argc, char * argv[]){
     timer.it_value.tv_usec = (suseconds_t)0;
 
     if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
-        log_error("Set timer");
+        syslog(LOG_ERR, "%s: %m", "Error set timer");
         goto cleanup_server ;
     }
 
