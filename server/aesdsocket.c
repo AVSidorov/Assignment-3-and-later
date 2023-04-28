@@ -91,11 +91,10 @@ void exit_norm(void){
 void exit_handler(int sig)
 {
     running = 0;
+    syslog(LOG_DEBUG,"%s", "Caught signal, exiting");
     if (wait_connection){
         exit_norm();
     }
-
-    syslog(LOG_DEBUG,"%s", "Caught signal, exiting");
 
 }
 
@@ -222,7 +221,7 @@ void *process_connection(void *thread_data){
     // mark thread as finished
     data -> state = 1;
 
-    pthread_exit(NULL);
+    //pthread_exit(NULL);
 }
 
 void accept_connection(void){
