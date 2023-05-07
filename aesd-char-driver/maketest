@@ -1,0 +1,23 @@
+CC = gcc
+CFLAGS=
+LDFLAGS=
+
+
+EXECUTABLE=test_buf
+SOURCES=$(EXECUTABLE).c aesd-circular-buffer.c
+OBJECTS=$(SOURCES:.c=.o)
+
+
+CROSS_COMPILE=
+     
+all: $(EXECUTABLE)
+
+$(EXECUTABLE): $(OBJECTS)
+	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+
+$(OBJECTS): $(SOURCES)
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $^
+
+
+clean:
+	rm -f $(EXECUTABLE) $(OBJECTS)

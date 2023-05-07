@@ -48,8 +48,8 @@ int main(int argc, char *argv[]){
 
 	printf("Test Macro GET_ENTRY\n");
 	for (uint8_t cur=0; cur < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED * 2; cur++){
-		entry = &AESD_CIRCULAR_BUFFER_GET_ENTRY(buf,cur);
-		printf("%s|",entry->buffptr);
+		entry = AESD_CIRCULAR_BUFFER_GET_ENTRY(buf,cur);
+		if(entry) printf("%s|",entry->buffptr);
 	}
 	printf("\n");
 
