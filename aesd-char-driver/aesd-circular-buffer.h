@@ -16,7 +16,9 @@
 #include <stdbool.h>
 #endif
 
+
 #define AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED 10
+
 
 typedef struct aesd_buffer_entry
 {
@@ -28,7 +30,7 @@ typedef struct aesd_buffer_entry
      * Number of bytes stored in buffptr
      */
     size_t size;
-} entry_t;
+} aesd_buffer_entry_t;
 
 typedef struct aesd_circular_buffer
 {
@@ -79,6 +81,5 @@ extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
 #define AESD_CIRCULAR_BUFFER_GET_ENTRY(bufferptr, index) \
 	(bufferptr->entry[((bufferptr->out_offs)+index) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED])
-
 
 #endif /* AESD_CIRCULAR_BUFFER_H */
