@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS=
-LDFLAGS=
+CFLAGS= -g -O0
+LDFLAGS= -g
 
 
 EXECUTABLE=test_buf
