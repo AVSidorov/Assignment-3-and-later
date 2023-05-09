@@ -54,7 +54,7 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 
 
 	// if neccessary trim buf. Then check last symbol in entry buf will work
-	if(pos = strchr(buf,'\n')){
+	if((pos = strchr(buf,'\n'))){
 		if (((pos-buf)+1)*sizeof(char) < buf_size){
 			memset(pos+1, 0, buf_size - (pos-buf)*sizeof(char));
 			buf_size = (pos-buf+1)*sizeof(char);
