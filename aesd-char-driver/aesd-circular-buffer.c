@@ -39,7 +39,8 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 		entry = AESD_CIRCULAR_BUFFER_GET_ENTRY(buffer, cur);
 		if (entry != NULL){
 			if (pos + entry->size > char_offset){
-				*entry_offset_byte_rtn = char_offset - pos;
+				if (entry_offset_byte_rtn) //check address is valid
+					*entry_offset_byte_rtn = char_offset - pos;
 				return entry;
 			}
 			else
@@ -63,6 +64,9 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, struct 
 {
 	uint8_t in_pos = buffer->in_offs;
 	buffer->entry[in_pos] = add_entry;
+	// TODO try to save const modifier using
+	// buffer->entry[in_pos]->buffptr = add_entry->buffptr
+	// buffer->entry[in_pos]->size = add_entry->size
 	buffer->in_offs = (in_pos + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
 	if (buffer->full)
 		buffer->out_offs = buffer->in_offs;
