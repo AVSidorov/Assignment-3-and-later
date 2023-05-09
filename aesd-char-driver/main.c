@@ -13,15 +13,18 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
+
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
 #include "aesdchar.h"
+#include "queue.h"
+
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Anton Sidorov");
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
@@ -29,9 +32,11 @@ struct aesd_dev aesd_device;
 int aesd_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("open");
-    /**
-     * TODO: handle open
-     */
+ 	struct aesd_device *dev; /* device information */
+
+	dev = container_of(inode->i_cdev, struct scull_dev, cdev);
+	filp->private_data = dev; /* for other methods */
+
     return 0;
 }
 
@@ -65,6 +70,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
      */
     return retval;
 }
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
@@ -105,7 +111,10 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+	mutex_init(&aesd_device.circ_buf_lock);
 
+	STAILQ_INIT(&aesd_device.queue)
+	mutex_init(&aesd_device.queue_lock);
     result = aesd_setup_cdev(&aesd_device);
 
     if( result ) {
@@ -124,6 +133,7 @@ void aesd_cleanup_module(void)
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
+
 
     unregister_chrdev_region(devno, 1);
 }

@@ -21,24 +21,54 @@ aesd_circular_buffer_t *circ_buf;
 
 /* Test prototype for write function in driver*/
 
-ssize_t aesd_write(const char *buf, size_t count, size_t *f_pos)
+ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 {
 	// TODO using f_pos
 
 	// TODO change error codes to constants
 	ssize_t retval = -1;
+	uint8_t packet = 0;
+
 	qentry_node_t *node;
 	aesd_buffer_entry_t *full_cmd;
 
 	size_t buf_size = count*sizeof(char);
-	uint8_t packet = 0;
+
+	//TODO kmalloc
+	char *buf = malloc(buf_size);
+
+	// TODO here should be used returned allocated size
+	// buf_size = kmalloc(...
+
+	if (!buf){
+		perror("Error allocate buffer for write data");
+		goto clean_buf;
+	}
+	memset(buf, 0, buf_size);
+
+	// TODO retval = copy_from_user()
+	// TODO PDEBUG size of copied
+	if (memcpy(buf, ubuf, buf_size) == NULL){
+		perror("Error copy from user buf");
+		goto clean_buf;
+	}
+	// TODO real copied size, change buf_size
+
+
+	// TODO make checking \n here
+	// if neccessary trim buf. Then check last symbol in entry buf will work
+
+	//TODO check available size in last queue entry
+	// if avail add data save stored size for return (can be less then full)
+	// goto check end of packet
 
 	// TODO change go kmalloc
 	node = malloc(sizeof(qentry_node_t));
 	if (!node){
 		perror("Error allocate node");
-		goto ret;
+		goto clean_buf;
 	}
+	memset(node, 0, sizeof(qentry_node_t));
 
 	// TODO change go kmalloc
 	node->entry = malloc(sizeof(aesd_buffer_entry_t));
@@ -46,27 +76,15 @@ ssize_t aesd_write(const char *buf, size_t count, size_t *f_pos)
 		perror("Allocate entry");
 		goto clean_node;
 	}
+	memset(node->entry, 0, sizeof(aesd_buffer_entry_t));
 
-	// TODO change go kmalloc
-	node->entry->buffptr = malloc(buf_size);
+	node->entry->buffptr = buf;
 	node->entry->size = buf_size;
-	if(!node->entry->buffptr){
-		perror("Error allocate buf");
-		goto clean_entry;
-	}
-
-	// TODO retval = copy_from_user()
-	// TODO PDEBUG size of copied
-	if (memcpy(node->entry->buffptr, buf, buf_size) == NULL){
-		perror("Error copy from buf");
-		goto clean_buffptr;
-	}
-	// TODO real copied size
-	// node->entry->size = retval;
-
+	buf = NULL; // to avoid fail due to repeated free at clean_buffptr;
 
 
 	// add full command to circular buffer
+	// check can pass. Buffer should be cut at beginning of function
 	if (node->entry->buffptr[node->entry->size - 1] == '\n'){
 		// TODO change go kmalloc
 		full_cmd = malloc(sizeof(aesd_buffer_entry_t));
@@ -137,8 +155,47 @@ ssize_t aesd_write(const char *buf, size_t count, size_t *f_pos)
 	clean_buffptr: free(node->entry->buffptr);
 	clean_entry: free(node->entry);
 	clean_node:	free(node);
+	clean_buf: free(buf);
 
 	ret: return retval;
+}
+
+ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
+{
+	ssize_t retval = 0;
+	//PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
+    //struct aesd_divice *dev = filp->private_data;
+
+    aesd_buffer_entry_t *entry;
+    size_t offs_entry; //for avoiding "transfer" pointer and calculations
+    size_t offs_full=*f_pos;
+    char *pos;
+
+//	if (mutex_lock_interruptible(&dev->circ_buf_lock))
+//		return -ERESTARTSYS;
+	entry = aesd_circular_buffer_find_entry_offset_for_fpos(circ_buf, offs_full, &offs_entry);
+	if (!entry){ //Entry not found
+		retval=0;
+		goto out;
+	}
+
+	/* Calculate size to return. Return no more than one command (till end entry buffer)*/
+	if ((entry->size - offs_entry) >= count)
+		retval = count;
+	else
+		retval = entry->size - offs_entry;
+
+	//move pos in accordance with offs_entry
+	pos = entry->buffptr + offs_entry;
+
+	// TODO copy_from_user
+	if (memcpy(ubuf, pos, retval) == NULL){
+		perror("Error copy data to user");
+		retval = -1;
+	}
+
+	//out: mutex_unlock(&dev->cicr_buf_lock);
+	out: return retval;
 }
 
 void print_buf(const aesd_circular_buffer_t *buf){
@@ -264,12 +321,116 @@ int main(int argc, char *argv[]){
 	aesd_write("write4\n", 7, &wr_size);
 	aesd_write("write5\n", 7, &wr_size);
 	aesd_write("write6\n", 7, &wr_size);
-//	aesd_write("write7\n", 7, &wr_size);
-//	aesd_write("write8\n", 7, &wr_size);
-//	aesd_write("write9\n", 7, &wr_size);
-//	aesd_write("write10\n", 8, &wr_size);
-//	aesd_write("write11", 7, &wr_size);
-//	aesd_write("\n", 1, &wr_size);
-//	aesd_write("write12\n", 8, &wr_size);
+	aesd_write("write7\n", 7, &wr_size);
+	aesd_write("write8\n", 7, &wr_size);
+	aesd_write("write9\n", 7, &wr_size);
+	aesd_write("write10\n", 8, &wr_size);
+	aesd_write("write11", 7, &wr_size);
+	aesd_write("\n", 1, &wr_size);
+	aesd_write("write12\n", 8, &wr_size);
 	print_buf(circ_buf);
+
+	printf("\n\n==================================\n");
+	printf("||Test read from circular buffer||\n");
+	printf("==================================\n");
+	char buf_read[1024];
+	memset(&buf_read, 0, 1024);
+	size_t count, size_read, pos;
+	count = 1024;
+
+	count = 1024;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=1;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=3;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=7;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=9;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=15;
+	pos = 5;
+	printf("\nRead full buffer size %lu bytes from pos 5\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=9;
+	pos = 12;
+	printf("\nRead full buffer size %lu bytes from pos 12\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+	count=10;
+	pos = 10;
+	printf("\nRead full buffer size %lu bytes from pos 10\n", count);
+	while ((size_read = aesd_read(&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
 }
