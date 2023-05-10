@@ -113,6 +113,7 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 			goto clean_full_cmd;
 		}
 		full_cmd->size = queue_size + node->entry->size;
+		memset(full_buf, 0, full_cmd->size);
 
 		packet = 1;
 	}

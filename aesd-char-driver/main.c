@@ -60,7 +60,6 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     aesd_buffer_entry_t *entry = NULL;
     size_t offs_entry; // for getting offset inside entry
     size_t offs_full=*f_pos; //for avoiding "transfer" pointer and calculations
-    char *pos=NULL;
 
 	PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
@@ -82,12 +81,10 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
 	PDEBUG("%zu bytes will be copied to user", count);
 
-	//move pos in accordance with offs_entry
-	pos = entry->buffptr + offs_entry;
 
-	PDEBUG("%s will be copied to user", pos);
+	PDEBUG("%s will be copied to user", entry->buffptr + offs_entry);
 
-	retval = copy_to_user(buf, pos, count);
+	retval = copy_to_user(buf, entry->buffptr + offs_entry, count);
 	if (retval) {
 		PDEBUG("fail copy to user");
 		retval = -EFAULT;
@@ -117,6 +114,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 	qentry_node_t *node = NULL;	//queue node, which points to short (working) entry to store in/get from queue
 	aesd_buffer_entry_t *full_cmd = NULL;	//long entry for adding to circular buffer
+
+	char *full_buf=NULL; // buffer to collect full command
 	aesd_buffer_entry_t *del_cmd = NULL; // to save pointer to free memory
 
 	size_t buf_size = count*sizeof(char);
@@ -155,10 +154,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	retval = buf_size;
 
 
-	//TODO check available size in last queue entry
-	// if avail add data save stored size for return (can be less then full)
-	// goto check end of packet
-
 	node = kmalloc(sizeof(qentry_node_t), GFP_KERNEL);
 	if (!node){
 		PDEBUG("Error allocate node");
@@ -177,7 +172,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 	node->entry->buffptr = buffer;
 	node->entry->size = buf_size;
-	buffer = NULL; // to avoid fail due to repeated free at clean_buffptr;
+	// Store buffer to clear memory in case of fail
+
 
 
 	// add full command to circular buffer
@@ -188,18 +184,18 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		if (!full_cmd){
 			PDEBUG("Error allocation entry for full command");
 			retval = -ENOMEM;
-			goto clean_buffptr;
+			goto clean_entry;
 		}
 		memset(full_cmd, 0, sizeof(aesd_buffer_entry_t));
 
-		full_cmd->buffptr = kmalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
-		if (!full_cmd->buffptr){
+		full_buf = kmalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
+		if (!full_buf){
 			retval = -ENOMEM;
 			PDEBUG("Error allocate full command buffer");
 			goto clean_full_cmd;
 		}
 		full_cmd->size = dev->queue_size + node->entry->size;
-		memset(full_cmd->buffptr, 0, full_cmd->size);
+		memset(full_buf, 0, full_cmd->size);
 
 		packet = 1;
 	}
@@ -240,7 +236,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		}
 
 		PDEBUG("From queue to circular buffer");
-		pos = full_cmd->buffptr;
+		pos = full_buf;
 
 		while(!STAILQ_EMPTY(&dev->queue)){
 			node = STAILQ_FIRST(&dev->queue);
@@ -251,7 +247,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 				retval= -EFAULT;
 			}
 			pos += node->entry->size;
-			kfree(node->entry->buffptr);
+			kfree((void *)(node->entry->buffptr));
 			kfree(node->entry);
 			kfree(node);
 			node = NULL;
@@ -281,7 +277,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		if(del_cmd){ //here del_cmd NULL or saved entry
 		// if buffer not full del_cmd will NULL it's important for first free access to member
 			PDEBUG("Free replaced command");
-			kfree(del_cmd->buffptr);
+			kfree((void *)(del_cmd->buffptr));
 			kfree(del_cmd);
 			del_cmd=NULL;
 		}
@@ -295,11 +291,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	return retval; // All allocated data in use. Return here.
 
 	// Cleanup in case of errors.
-	clean_full_buffptr: kfree(full_cmd->buffptr);
+	clean_full_buffptr: kfree(full_buf);
 	clean_full_cmd: kfree(full_cmd);
-
-	clean_buffptr: kfree(node->entry->buffptr);
-					kfree(node->entry);
+	clean_entry: kfree(node->entry);
 	clean_node:	kfree(node);
 	clean_buf: kfree(buffer);
 
