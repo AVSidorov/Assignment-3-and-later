@@ -112,13 +112,15 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	//move pos in accordance with offs_entry
 	pos = entry->buffptr + offs_entry;
 
+	PDEBUG("%s will be copied to user", pos);
+
 	retval = copy_to_user(buf, pos, retval);
 	if (retval) {
 		PDEBUG("fail copy to user");
 		retval = -EFAULT;
 		goto out;
 	}
-	PDEBUG("%zu bytes copied to user", retval);
+	PDEBUG("Copy to user returned %zu ", retval);
 
 	out: mutex_unlock(&dev->circ_buf_lock);
 	return retval;
@@ -143,7 +145,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	char *buffer = kmalloc(buf_size, GFP_KERNEL);
 
 
-	PDEBUG("write %zu bytes with offset %lld",buf_size,*f_pos);
+	PDEBUG("write %zu bytes with offset %lld", buf_size,*f_pos);
+
 
 	if (!buffer){
 		PDEBUG("Error allocate buffer for write data");
@@ -153,20 +156,21 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 	memset(buffer, 0, buf_size);
 
-	// TODO retval = copy_from_user()
-	// TODO PDEBUG size of copied
 	if (copy_from_user(buffer, buf, buf_size)){
 		retval = -EFAULT;
 		PDEBUG("Error copy from user buf");
 		goto clean_buf;
 	}
 
+	 PDEBUG("%s copied from user", buffer);
 
 	// if neccessary trim buf. Then check last symbol in entry buf will work
 	if((pos = strchr(buffer,'\n'))){
+		PDEBUG("End line found");
 		if (((pos-buffer)+1)*sizeof(char) < buf_size){
 			memset(pos+1, 0, buf_size - (pos-buffer)*sizeof(char));
 			buf_size = (pos-buffer+1)*sizeof(char);
+			PDEBUG("Data trimmed");
 		}
 		pos = NULL;
 	}
@@ -201,6 +205,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	// add full command to circular buffer
 	// check can pass. Buffer should be cut at beginning of function
 	if (node->entry->buffptr[node->entry->size - 1] == '\n'){
+		PDEBUG("Make entry for circular buffer. New line symbol found");
 		full_cmd = kmalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
 		if (!full_cmd){
 			PDEBUG("Error allocation entry for full command");
@@ -232,7 +237,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 								// full_cmd=full_cmd->buffptr=NULL
 	}
 
-
+	PDEBUG("Add to queue");
 	if (STAILQ_EMPTY(&dev->queue)){
 		STAILQ_NEXT(node, next) = NULL;
 		STAILQ_INSERT_HEAD(&dev->queue,node, next);
@@ -256,7 +261,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 			goto clean_full_buffptr;
 		}
 
-
+		PDEBUG("From queue to circular buffer");
 		pos = full_cmd->buffptr;
 
 		while(!STAILQ_EMPTY(&dev->queue)){
@@ -287,6 +292,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 			goto clean_full_buffptr;
 		}
 
+		PDEBUG("Add to circular buffer");
 		// We need free memory from first command in buffer
 		if (dev->circ_buf.full)
 			del_cmd = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL);
@@ -392,7 +398,7 @@ void aesd_cleanup_module(void)
 		kfree(entry);
 		entry = NULL;
 	}
-	// clean all pointers to avoid access
+	PDEBUG("Circular buffer clean all pointers to avoid access");
 	aesd_circular_buffer_init(&aesd_device.circ_buf);
 
     unregister_chrdev_region(devno, 1);
