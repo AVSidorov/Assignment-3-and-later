@@ -197,19 +197,19 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 	}
 
 	/* Calculate size to return. Return no more than one command (till end entry buffer)*/
-	if ((entry->size - offs_entry) >= count)
-		retval = count;
-	else
-		retval = entry->size - offs_entry;
+	if ((entry->size - offs_entry) < count)
+		count = entry->size - offs_entry;
 
 	//move pos in accordance with offs_entry
 	pos = entry->buffptr + offs_entry;
 
 	// TODO copy_from_user
-	if (memcpy(ubuf, pos, retval) == NULL){
+	if (memcpy(ubuf, pos, count) == NULL){
 		perror("Error copy data to user");
 		retval = -1;
 	}
+	*f_pos += count;
+	retval = count;
 
 	//out: mutex_unlock(&dev->cicr_buf_lock);
 	out: return retval;
@@ -230,6 +230,23 @@ void print_buf(const aesd_circular_buffer_t *buf){
 
 	}
 	printf("\n");
+}
+
+void read_buf(size_t count, size_t pos_from){
+	char buf_read[1024];
+	memset((char *)&buf_read, 0, 1024);
+	count = count % 1025;
+	size_t size_read;
+	size_t pos=pos_from;
+
+	printf("\n===Read full buffer size %lu bytes from pos %lu ===\n", count, pos);
+	while ((size_read = aesd_read((char *)&buf_read, count, &pos))){
+		printf("%s", buf_read);
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		printf("\t:%lu bytes read %lu new count, %lu new pos\n", size_read, count, pos);
+	}
+	printf("\n===End Test===\n");
 }
 
 int main(int argc, char *argv[]){
@@ -337,106 +354,17 @@ int main(int argc, char *argv[]){
 	printf("\n\n==================================\n");
 	printf("||Test read from circular buffer||\n");
 	printf("==================================\n");
-	char buf_read[1024];
-	memset((char *)&buf_read, 0, 1024);
-	size_t count, size_read, pos;
-	count = 1024;
 
-	count = 1024;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=1;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=3;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=7;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)(char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=9;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=15;
-	pos = 5;
-	printf("\nRead full buffer size %lu bytes from pos 5\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=9;
-	pos = 12;
-	printf("\nRead full buffer size %lu bytes from pos 12\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-	count=10;
-	pos = 10;
-	printf("\nRead full buffer size %lu bytes from pos 10\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
+	read_buf(1024,0);
+	read_buf(1,0);
+	read_buf(3,0);
+	read_buf(7,0);
+	read_buf(9,0);
+	read_buf(15,0);
+	read_buf(15,5);
+	read_buf(9,12);
+	read_buf(10,12);
+	read_buf(10,10);
 
 	printf("\n===Clean Circular Buffer===\n");
 
@@ -450,19 +378,7 @@ int main(int argc, char *argv[]){
 
 	print_buf(circ_buf);
 
-	count = 1024;
-	pos = 0;
-	printf("\nRead full buffer size %lu bytes\n", count);
-	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
-		printf("%s", buf_read);
-		pos += size_read;
-		count -= size_read;
-		memset(&buf_read, 0, 1024);
-		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
-	}
-	printf("\n===End Test===\n");
-
-
+	read_buf(1024,0);
 
 	return 0;
 }

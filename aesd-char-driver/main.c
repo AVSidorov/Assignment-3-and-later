@@ -102,25 +102,30 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	}
 
 	/* Calculate size to return. Return no more than one command (till end entry buffer)*/
-	if ((entry->size - offs_entry) >= count)
-		retval = count;
-	else
-		retval = entry->size - offs_entry;
+	if ((entry->size - offs_entry) < count){
+		PDEBUG("Reduce out count. Till end of entry buffer (end of command)");
+		count = entry->size - offs_entry;
+	}
 
-	PDEBUG("%zu bytes will be copied to user", retval);
+	PDEBUG("%zu bytes will be copied to user", count);
 
 	//move pos in accordance with offs_entry
 	pos = entry->buffptr + offs_entry;
 
 	PDEBUG("%s will be copied to user", pos);
 
-	retval = copy_to_user(buf, pos, retval);
+	retval = copy_to_user(buf, pos, count);
 	if (retval) {
 		PDEBUG("fail copy to user");
 		retval = -EFAULT;
 		goto out;
 	}
-	PDEBUG("Copy to user returned %zu ", retval);
+
+	*f_pos += count;
+	offs_full = *f_pos; // for correct printk
+	PDEBUG("New file position %zu ", offs_full);
+	PDEBUG("aesd_read returns %zu ", retval);
+	retval = count;
 
 	out: mutex_unlock(&dev->circ_buf_lock);
 	return retval;
