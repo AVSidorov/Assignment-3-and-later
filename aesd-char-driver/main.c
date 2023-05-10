@@ -14,10 +14,13 @@
 #include <linux/module.h>
 #include <linux/init.h>
 
+/* #include <linux/kernel.h>*/	/* printk() */
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
+#include <linux/uaccess.h>	/* copy_*_user */
+#include <linux/slab.h>		/* kmalloc() */
 #include "aesdchar.h"
 
 int aesd_major =   0; // use dynamic major
