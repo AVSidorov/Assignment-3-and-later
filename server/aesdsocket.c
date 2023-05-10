@@ -424,7 +424,7 @@ int main(int argc, char * argv[]){
 
 
     /* Set timer*/
-    struct itimerval timer;
+    /*struct itimerval timer;
     timer.it_interval.tv_sec = (time_t)KEEPALIVE;
     timer.it_interval.tv_usec = (suseconds_t)KEEPALIVE;
     timer.it_value.tv_sec = (time_t)10;
@@ -433,7 +433,7 @@ int main(int argc, char * argv[]){
     if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
         syslog(LOG_ERR, "%s: %m", "Error set timer");
         goto cleanup_server ;
-    }
+    }*/
 
     /* Loop forever accepting incoming connections */
     // Init list
