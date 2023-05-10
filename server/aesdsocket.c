@@ -15,7 +15,7 @@
 #define PORT 9000
 #define MAX_CLIENTS 5
 #define BUF_SIZE 1024
-#define FILENAME "/var/tmp/aesdsocketdata"
+#define FILENAME "/dev/aesdchar"
 #define KEEPALIVE 10
 
 static volatile int running = 1;
@@ -337,7 +337,7 @@ int main(int argc, char * argv[]){
     sigaddset(&sa_alrm.sa_mask, SIGTERM);
     sigaddset(&sa_alrm.sa_mask, SIGINT);
     sa_alrm.sa_flags = 0;
-    sigaction(SIGALRM, &sa_alrm, NULL);
+    //sigaction(SIGALRM, &sa_alrm, NULL);
 
     /*
     *   Main socket section
