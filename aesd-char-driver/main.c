@@ -43,11 +43,35 @@ int aesd_open(struct inode *inode, struct file *filp)
 
 int aesd_release(struct inode *inode, struct file *filp)
 {
+    struct aesd_dev *dev = filp->private_data;
+    qentry_node_t *node = NULL;
+    ssize_t retval = -EFAULT;
+
     PDEBUG("release");
-    /**
-     * TODO: handle release
-     */
-    return 0;
+
+	if (mutex_lock_interruptible(&dev->queue_lock)){
+		PDEBUG("Error lock  mutex for cleaning queue");
+		return -ERESTARTSYS;
+		}
+
+		PDEBUG("Queue clean");
+		while(!STAILQ_EMPTY(&dev->queue)){
+			node = STAILQ_FIRST(&dev->queue);
+			STAILQ_REMOVE_HEAD(&dev->queue, next);
+
+			kfree(node->entry->buffptr);
+			kfree(node->entry);
+			kfree(node);
+			node = NULL;
+		}
+
+		// Bring queue to initial (null) state
+		STAILQ_INIT(&aesd_device.queue);
+		dev->queue_size = 0;
+
+    mutex_unlock(&dev->queue_lock);
+
+    return retval;
 }
 
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
@@ -58,8 +82,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_dev *dev = filp->private_data;
 
     aesd_buffer_entry_t *entry = NULL;
-    size_t offs_entry; //for avoiding "transfer" pointer and calculations
-    size_t offs_full=*f_pos;
+    size_t offs_entry; // for getting offset inside entry
+    size_t offs_full=*f_pos; //for avoiding "transfer" pointer and calculations
     char *pos=NULL;
 
 	PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
@@ -85,7 +109,6 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	//move pos in accordance with offs_entry
 	pos = entry->buffptr + offs_entry;
 
-	// TODO copy_from_user
 	retval = copy_to_user(buf, pos, retval);
 	if (retval) {
 		PDEBUG("fail copy to user");
@@ -226,7 +249,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 		if (mutex_lock_interruptible(&dev->queue_lock)){
 			PDEBUG("Error lock  mutex for queue. Making full command entry, clean queue.");
-			return -ERESTARTSYS;
+			retval = -ERESTARTSYS;
 			goto clean_full_buffptr;
 		}
 
@@ -336,6 +359,7 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+	aesd_circular_buffer_init(&aesd_device.circ_buf);
 	mutex_init(&aesd_device.circ_buf_lock);
 
 	STAILQ_INIT(&aesd_device.queue);
@@ -353,12 +377,20 @@ void aesd_cleanup_module(void)
 {
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
+	aesd_buffer_entry_t *entry=NULL;
+	uint8_t i=0;
+
     cdev_del(&aesd_device.cdev);
 
-    /**
-     * TODO: cleanup AESD specific poritions here as necessary
-     */
+	PDEBUG("Clean Circular Buffer");
 
+	AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circ_buf,i){
+		kfree(entry->buffptr);
+		kfree(entry);
+		entry = NULL;
+	}
+	// clean all pointers to avoid access
+	aesd_circular_buffer_init(&aesd_device.circ_buf);
 
     unregister_chrdev_region(devno, 1);
 }

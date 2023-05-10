@@ -216,8 +216,8 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 }
 
 void print_buf(const aesd_circular_buffer_t *buf){
-	aesd_buffer_entry_t *entry;
-	int i;
+	aesd_buffer_entry_t *entry = NULL;
+	int i=0;
 
 	printf("Print full buffer\n");
 	AESD_CIRCULAR_BUFFER_FOREACH(entry,buf,i){
@@ -293,7 +293,7 @@ int main(int argc, char *argv[]){
 	if (entry != NULL)
 		printf("Found %s. Position is %lu\n", entry->buffptr, offs_byte);
 	}
-
+	entry = NULL;
 
 	printf("\n");
 	printf("=====================================\n");
@@ -309,7 +309,7 @@ int main(int argc, char *argv[]){
 	aesd_circular_buffer_init(circ_buf);
 
 	if (circ_buf->full)
-	 	printf("Full Just after init\n");
+	 	printf("!!!!!!!!!!!Full Just after init\n");
 
 	printf("Test write function\n");
 
@@ -437,4 +437,32 @@ int main(int argc, char *argv[]){
 		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
 	}
 	printf("\n===End Test===\n");
+
+	printf("\n===Clean Circular Buffer===\n");
+
+	AESD_CIRCULAR_BUFFER_FOREACH(entry, circ_buf,i){
+		free(entry->buffptr);
+		free(entry);
+		entry = NULL;
+	}
+	// clean all pointers to avoid access
+	aesd_circular_buffer_init(circ_buf);
+
+	print_buf(circ_buf);
+
+	count = 1024;
+	pos = 0;
+	printf("\nRead full buffer size %lu bytes\n", count);
+	while ((size_read = aesd_read((char *)&buf_read, count, &pos)) && count){
+		printf("%s", buf_read);
+		pos += size_read;
+		count -= size_read;
+		memset(&buf_read, 0, 1024);
+		//printf("\t:%lu bytes read %lu new pos, %lu new count\n", size_read, pos, count);
+	}
+	printf("\n===End Test===\n");
+
+
+
+	return 0;
 }
