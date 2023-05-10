@@ -46,35 +46,8 @@ int aesd_open(struct inode *inode, struct file *filp)
 
 int aesd_release(struct inode *inode, struct file *filp)
 {
-    struct aesd_dev *dev = filp->private_data;
-    qentry_node_t *node = NULL;
-    ssize_t retval = -EFAULT;
-
-    PDEBUG("release");
-
-	if (mutex_lock_interruptible(&dev->queue_lock)){
-		PDEBUG("Error lock  mutex for cleaning queue");
-		return -ERESTARTSYS;
-		}
-
-		PDEBUG("Queue clean");
-		while(!STAILQ_EMPTY(&dev->queue)){
-			node = STAILQ_FIRST(&dev->queue);
-			STAILQ_REMOVE_HEAD(&dev->queue, next);
-
-			kfree(node->entry->buffptr);
-			kfree(node->entry);
-			kfree(node);
-			node = NULL;
-		}
-
-		// Bring queue to initial (null) state
-		STAILQ_INIT(&aesd_device.queue);
-		dev->queue_size = 0;
-
-    mutex_unlock(&dev->queue_lock);
-
-    return retval;
+	PDEBUG("release");
+	return 0;
 }
 
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
@@ -389,12 +362,31 @@ int aesd_init_module(void)
 
 void aesd_cleanup_module(void)
 {
-    dev_t devno = MKDEV(aesd_major, aesd_minor);
+	dev_t devno = MKDEV(aesd_major, aesd_minor);
 
 	aesd_buffer_entry_t *entry=NULL;
 	uint8_t i=0;
 
-    cdev_del(&aesd_device.cdev);
+	qentry_node_t *node = NULL;
+
+	cdev_del(&aesd_device.cdev);
+
+
+	PDEBUG("Queue clean");
+
+	while(!STAILQ_EMPTY(&aesd_device.queue)){
+		node = STAILQ_FIRST(&aesd_device.queue);
+		STAILQ_REMOVE_HEAD(&aesd_device.queue, next);
+
+		kfree(node->entry->buffptr);
+		kfree(node->entry);
+		kfree(node);
+		node = NULL;
+	}
+
+	PDEBUG("Bring queue to initial (null) state");
+	STAILQ_INIT(&aesd_device.queue);
+	aesd_device.queue_size = 0;
 
 	PDEBUG("Clean Circular Buffer");
 
