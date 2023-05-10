@@ -6,11 +6,16 @@
 
 /* Data structures and queue */
 
+typedef struct qentry{
+    char* buffptr;
+    size_t size;
+} qentry_t;
 
 typedef struct qentry_node{
     aesd_buffer_entry_t *entry;
     STAILQ_ENTRY(qentry_node) next;
 } qentry_node_t;
+
 
 typedef STAILQ_HEAD(aesd_buffer_entry_queue, qentry_node) queue_t;
 
@@ -19,7 +24,10 @@ size_t queue_size=0;
 
 aesd_circular_buffer_t *circ_buf;
 
-/* Test prototype for write function in driver*/
+/***************************************************************
+* Test prototype for write function in driver
+****************************************************************/
+
 
 ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 {
@@ -31,8 +39,10 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 	char *pos = NULL;
 
 	qentry_node_t *node=NULL;
-	aesd_buffer_entry_t *full_cmd=NULL;
-	aesd_buffer_entry_t *del_cmd=NULL; // to save pointer to free memory
+	aesd_buffer_entry_t *full_cmd;
+
+	char *full_buf=NULL;
+	void *del_buf=NULL; // to save pointer to free memory
 
 	size_t buf_size = count*sizeof(char);
 
@@ -81,28 +91,28 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 
 	node->entry->buffptr = buf;
 	node->entry->size = buf_size;
-	buf = NULL; // to avoid fail due to repeated free at clean_buffptr;
+	// Store buf to clear memory in case of fail
 
 
 	// add full command to circular buffer
 	// check can pass. Buffer should be cut at beginning of function
 	if (node->entry->buffptr[node->entry->size - 1] == '\n'){
 		// TODO change go kmalloc
+
 		full_cmd = malloc(sizeof(aesd_buffer_entry_t));
 		if (!full_cmd){
 			perror("Error allocation entry for full command");
-			goto clean_buffptr;
+			goto clean_entry;
 		}
-		memset(full_cmd, 0, sizeof(aesd_buffer_entry_t));
+
 
 		// TODO change go kmalloc
-		full_cmd->buffptr = malloc(queue_size + node->entry->size);
-		if (!full_cmd->buffptr){
+		full_buf = malloc(queue_size + node->entry->size);
+		if (!full_buf){
 			perror("Error allocate full command buffer");
 			goto clean_full_cmd;
 		}
 		full_cmd->size = queue_size + node->entry->size;
-		memset(full_cmd->buffptr, 0, full_cmd->size);
 
 		packet = 1;
 	}
@@ -125,7 +135,7 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 	// here should be all allocation success. Add command to circular buffer
 	if (packet){
 		// TODO lock packet
-		pos = full_cmd->buffptr;
+		pos = full_buf;
 		while(!STAILQ_EMPTY(&queue)){
 			node = STAILQ_FIRST(&queue);
 			STAILQ_REMOVE_HEAD(&queue, next);
@@ -135,7 +145,7 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 				retval= -2; //
 			}
 			pos += node->entry->size;
-			free(node->entry->buffptr);
+			free((void *)(node->entry->buffptr));
 			free(node->entry);
 			free(node);
 			node = NULL;
@@ -150,15 +160,15 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 
 		// We need free memory from first command in buffer
 		if (circ_buf->full)
-			del_cmd = aesd_circular_buffer_find_entry_offset_for_fpos(circ_buf, 0, NULL);
+			del_buf = (void *)(aesd_circular_buffer_find_entry_offset_for_fpos(circ_buf, 0, NULL) ->buffptr);
 
+		full_cmd->buffptr = full_buf;
 		aesd_circular_buffer_add_entry(circ_buf, full_cmd);
 
-		// here full_cmd already replaced in circular buffer entry, which we stored in del_cmd
-		if(del_cmd){ //here del_cmd NULL or saved entry
-			free(del_cmd->buffptr);
-			free(del_cmd);
-			del_cmd=NULL;
+		// here full_cmd data already replaced in circular buffer entry. But we stored in del_buf pointer to old command
+		if(del_buf){ //here del_cmd NULL or saved entry
+			free(del_buf);
+			del_buf=NULL;
 		}
 		// TODO unlock circular buffer
 		packet = 0;
@@ -167,15 +177,18 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 	return retval;
 
 	// Cleanup in case of errors
-	clean_full_buffptr: free(full_cmd->buffptr);
+	clean_full_buffptr: free(full_buf);
 	clean_full_cmd: free(full_cmd);
-	clean_buffptr: free(node->entry->buffptr);
 	clean_entry: free(node->entry);
 	clean_node:	free(node);
 	clean_buf: free(buf);
 
 	ret: return retval;
 }
+
+/***************************************************************
+* Test prototype for read function in driver
+****************************************************************/
 
 ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 {
@@ -186,7 +199,6 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
     aesd_buffer_entry_t *entry;
     size_t offs_entry; //for avoiding "transfer" pointer and calculations
     size_t offs_full=*f_pos;
-    char *pos;
 
 //	if (mutex_lock_interruptible(&dev->circ_buf_lock))
 //		return -ERESTARTSYS;
@@ -200,11 +212,9 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 	if ((entry->size - offs_entry) < count)
 		count = entry->size - offs_entry;
 
-	//move pos in accordance with offs_entry
-	pos = entry->buffptr + offs_entry;
 
-	// TODO copy_from_user
-	if (memcpy(ubuf, pos, count) == NULL){
+	// TODO copy_to_user
+	if (memcpy(ubuf,  entry->buffptr + offs_entry, count) == NULL){
 		perror("Error copy data to user");
 		retval = -1;
 	}
@@ -214,6 +224,13 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 	//out: mutex_unlock(&dev->cicr_buf_lock);
 	out: return retval;
 }
+
+
+/***************************************************************
+*	Circular Buffer Test Functions (aesd-circular-buffer.h)
+****************************************************************/
+
+
 
 void print_buf(const aesd_circular_buffer_t *buf){
 	aesd_buffer_entry_t *entry = NULL;
@@ -249,6 +266,52 @@ void read_buf(size_t count, size_t pos_from){
 	printf("\n===End Test===\n");
 }
 
+void test_get_entry(aesd_circular_buffer_t *buf){
+	aesd_buffer_entry_t *entry = NULL;
+	aesd_buffer_entry_t *entry_print = NULL;
+
+	size_t offs_byte = 0;
+	size_t offs_pos = 0;
+
+//	printf("Test offset. For exit input non number\n");
+//			if (scanf("%lu", &offs_pos) == 0)
+//			break;
+
+	char buf1[100], buf2[100];
+	int i=0;
+
+	printf("\n===Test find_entry_offset_for_fpos===\n\n");
+
+	while ((entry = aesd_circular_buffer_find_entry_offset_for_fpos(buf, offs_pos, &offs_byte))){
+		AESD_CIRCULAR_BUFFER_FOREACH(entry_print,buf,i){
+		if (buf->in_offs == i)
+			printf("\033[31m%s\033[0m", entry_print->buffptr);
+		else if ( entry == entry_print)
+			printf("\033[32m%s\033[0m", entry_print->buffptr);
+		else
+			printf("%s", entry_print->buffptr);
+		}
+		printf("\n");
+
+		memset(buf1, 0, 100);
+		memset(buf2, 0, 100);
+		memcpy(buf1, entry->buffptr, offs_byte);
+		memcpy(buf2, entry->buffptr+offs_byte+1, entry->size-offs_byte-1);
+
+		printf("%lu is position in %s\033[33m%c\033[0m%s\n\n", offs_byte, buf1, entry->buffptr[offs_byte], buf2);
+		offs_pos++;
+	}
+
+	printf("\n===End Test===\n");
+
+	entry = NULL;
+
+}
+
+/******************************************************
+*		main
+*******************************************************/
+
 int main(int argc, char *argv[]){
 
 	/* Initialization*/
@@ -275,7 +338,12 @@ int main(int argc, char *argv[]){
 
 	/* Tests*/
 
-	printf("Test buffer\n");
+	printf("\n");
+	printf("======================================\n");
+	printf("||Test circular buffer base functions||\n");
+	printf("======================================\n");
+	printf("\n");
+
 
 	aesd_circular_buffer_t *buf=malloc(sizeof(aesd_circular_buffer_t));
 	aesd_circular_buffer_init(buf);
@@ -296,21 +364,8 @@ int main(int argc, char *argv[]){
 	}
 	printf("\n");
 
-	printf("Test offset. For exit input non number\n");
-	size_t offs_byte = 0;
-	size_t offs_pos = 0;
+	test_get_entry(buf);
 
-	entry = NULL;
-	int res=0;
-	while (1){
-		if (scanf("%lu", &offs_pos) == 0)
-			break;
-		//printf("Pos is %lu\n", offs_pos);
-		entry = aesd_circular_buffer_find_entry_offset_for_fpos(buf, offs_pos, &offs_byte);
-	if (entry != NULL)
-		printf("Found %s. Position is %lu\n", entry->buffptr, offs_byte);
-	}
-	entry = NULL;
 
 	printf("\n");
 	printf("=====================================\n");
@@ -369,7 +424,7 @@ int main(int argc, char *argv[]){
 	printf("\n===Clean Circular Buffer===\n");
 
 	AESD_CIRCULAR_BUFFER_FOREACH(entry, circ_buf,i){
-		free(entry->buffptr);
+		free((void *)(entry->buffptr));
 		free(entry);
 		entry = NULL;
 	}

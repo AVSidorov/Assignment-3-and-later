@@ -25,7 +25,7 @@ typedef struct aesd_buffer_entry
     /**
      * A location where the buffer contents in buffptr are stored
      */
-    char *buffptr;
+    const char *buffptr;
     /**
      * Number of bytes stored in buffptr
      */
