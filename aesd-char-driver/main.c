@@ -127,7 +127,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	void *del_buf = NULL; // to save pointer to free memory
 
 	size_t buf_size = count*sizeof(char);
-	char *buffer = kzalloc(buf_size, GFP_KERNEL);
+	char *buffer = kzalloc(buf_size+1, GFP_KERNEL);
 
 
 	PDEBUG("write %zu bytes with offset %lld", buf_size,*f_pos);
@@ -199,7 +199,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		PDEBUG("For full command entry allocated %zu bytes", ksize(full_cmd));
 		//memset(full_cmd, 0, ksize(full_cmd));
 
-		full_buf = kzalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
+		full_buf = kzalloc((dev->queue_size + node->entry->size)+1, GFP_KERNEL);
 		if (!full_buf){
 			retval = -ENOMEM;
 			PDEBUG("Error allocate full command buffer");
