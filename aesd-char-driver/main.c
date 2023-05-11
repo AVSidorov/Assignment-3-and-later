@@ -286,7 +286,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		if(del_cmd){ //here del_cmd NULL or saved entry
 		// if buffer not full del_cmd will NULL it's important for first free access to member
 			PDEBUG("Free replaced command");
-			kfree((del_cmd->buffptr);
+			kfree(del_cmd->buffptr);
 			//kfree(del_cmd);
 			del_cmd=NULL;
 		}
