@@ -123,8 +123,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	qentry_node_t *node = NULL;	//queue node, which points to short (working) entry to store in/get from queue
 	aesd_buffer_entry_t *full_cmd = NULL;	//long entry for adding to circular buffer
 
-	char *full_buf=NULL; // buffer to collect full command
-	aesd_buffer_entry_t *del_cmd = NULL; // to save pointer to free memory
+	char *full_buf = NULL; // buffer to collect full command
+	void *del_buf = NULL; // to save pointer to free memory
 
 	size_t buf_size = count*sizeof(char);
 	char *buffer = kmalloc(buf_size, GFP_KERNEL);
@@ -274,21 +274,27 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 			goto clean_full_buffptr;
 		}
 
-		PDEBUG("Add to circular buffer");
+		PDEBUG("Add to circular buffer %s", full_buf);
 		// We need free memory from first command in buffer
 		if (dev->circ_buf.full)
-			del_cmd = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL);
+			del_buf = (void *)(aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL)->buffptr);
 
+		PDEBUG("Save command in buf at %p", full_buf);
 		full_cmd->buffptr = full_buf;
 		aesd_circular_buffer_add_entry(&dev->circ_buf, full_cmd);
 
+		// data from full_cmd copied to circular buf
+		// here free full_cmd
+		kfree(full_cmd);
+		full_cmd = NULL;
+
 		// here full_cmd already replaced in circular buffer entry, which we stored in del_entry
-		if(del_cmd){ //here del_cmd NULL or saved entry
+		if(del_buf){ //here del_cmd NULL or saved entry
 		// if buffer not full del_cmd will NULL it's important for first free access to member
-			PDEBUG("Free replaced command");
-			kfree(del_cmd->buffptr);
+			PDEBUG("Free replaced command at %p", del_buf);
+			kfree(del_buf);
 			//kfree(del_cmd);
-			del_cmd=NULL;
+			del_buf=NULL;
 		}
 
 		mutex_unlock(&dev->circ_buf_lock);

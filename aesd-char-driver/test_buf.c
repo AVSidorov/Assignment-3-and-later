@@ -166,6 +166,11 @@ ssize_t aesd_write(const char *ubuf, size_t count, size_t *f_pos)
 		full_cmd->buffptr = full_buf;
 		aesd_circular_buffer_add_entry(circ_buf, full_cmd);
 
+		// data from full_cmd copied to circular buf
+		// here free full_cmd
+		free(full_cmd);
+		full_cmd=NULL;
+
 		// here full_cmd data already replaced in circular buffer entry. But we stored in del_buf pointer to old command
 		if(del_buf){ //here del_cmd NULL or saved entry
 			free(del_buf);
