@@ -57,6 +57,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
     struct aesd_dev *dev = filp->private_data;
 
+    const char *pos;
+
     aesd_buffer_entry_t *entry = NULL;
     size_t offs_entry; // for getting offset inside entry
     size_t offs_full=*f_pos; //for avoiding "transfer" pointer and calculations
@@ -81,10 +83,16 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
 	PDEBUG("%zu bytes will be copied to user", count);
 
+	pos = entry->buffptr + offs_entry;
 
-	PDEBUG("%s will be copied to user", entry->buffptr + offs_entry);
+	PDEBUG("%s will be copied to user", pos);
 
-	retval = copy_to_user(buf, entry->buffptr + offs_entry, count);
+	if (!pos){
+		PDEBUG("Buffer is NULL");
+		goto out;
+	}
+
+	retval = copy_to_user(buf, pos, count);
 	if (retval) {
 		PDEBUG("fail copy to user");
 		retval = -EFAULT;
@@ -271,6 +279,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		if (dev->circ_buf.full)
 			del_cmd = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL);
 
+		full_cmd->buffptr = full_buf;
 		aesd_circular_buffer_add_entry(&dev->circ_buf, full_cmd);
 
 		// here full_cmd already replaced in circular buffer entry, which we stored in del_entry
