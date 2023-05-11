@@ -234,7 +234,7 @@ ssize_t aesd_read(char *ubuf, size_t count, size_t *f_pos)
 
 
 void print_buf(const aesd_circular_buffer_t *buf){
-	aesd_buffer_entry_t *entry = NULL;
+	const aesd_buffer_entry_t *entry = NULL;
 	int i=0;
 
 	printf("Print full buffer\n");
@@ -426,7 +426,7 @@ int main(int argc, char *argv[]){
 
 	AESD_CIRCULAR_BUFFER_FOREACH(entry, circ_buf,i){
 		free((void *)(entry->buffptr));
-		free(entry);
+		//free(entry);
 		entry = NULL;
 	}
 	// clean all pointers to avoid access
