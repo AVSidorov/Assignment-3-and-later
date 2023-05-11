@@ -139,7 +139,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		goto clean_buf;
 	}
 
-	memset(buffer, 0, buf_size);
+	memset(buffer, 0, ksize(buffer));
 
 	if (copy_from_user(buffer, buf, buf_size)){
 		retval = -EFAULT;
@@ -168,7 +168,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		retval = -ENOMEM;
 		goto clean_buf;
 	}
-	memset(node, 0, sizeof(qentry_node_t));
+	memset(node, 0, ksize(node));
 
 	node->entry = kmalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
 	if (!node->entry){
@@ -176,7 +176,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		retval = -ENOMEM;
 		goto clean_node;
 	}
-	memset(node->entry, 0, sizeof(aesd_buffer_entry_t));
+	memset(node->entry, 0, ksize(node->entry));
 
 	node->entry->buffptr = buffer;
 	node->entry->size = buf_size;
@@ -194,7 +194,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 			retval = -ENOMEM;
 			goto clean_entry;
 		}
-		memset(full_cmd, 0, sizeof(aesd_buffer_entry_t));
+		memset(full_cmd, 0, ksize(full_cmd));
 
 		full_buf = kmalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
 		if (!full_buf){
@@ -203,7 +203,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 			goto clean_full_cmd;
 		}
 		full_cmd->size = dev->queue_size + node->entry->size;
-		memset(full_buf, 0, full_cmd->size);
+		memset(full_buf, 0, ksize(full_cmd));
 
 		packet = 1;
 	}
