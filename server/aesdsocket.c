@@ -72,8 +72,8 @@ void exit_norm(void){
     if (close(server_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    if (fsync(file_fd) < 0)
-        syslog(LOG_ERR, "%s: %m", "Error sync to disk before close");
+//    if (fsync(file_fd) < 0)
+//        syslog(LOG_ERR, "%s: %m", "Error sync to disk before close");
 
     if (close(file_fd) == -1)
         syslog(LOG_ERR, "%s: %m", "Close file");
@@ -154,9 +154,9 @@ void *process_connection(void *thread_data){
             // TODO check error and partial write
             write(file_fd, &buffer, bytes_read);
 
-            // ensure that data on disk
-            if (fsync(file_fd) < 0)
-                syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
+//            // ensure that data on disk
+//            if (fsync(file_fd) < 0)
+//                syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
 
             syslog(LOG_DEBUG,"received %ld bytes", bytes_read);
             syslog(LOG_DEBUG,"received %s", buffer);
