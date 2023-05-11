@@ -127,7 +127,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	void *del_buf = NULL; // to save pointer to free memory
 
 	size_t buf_size = count*sizeof(char);
-	char *buffer = kmalloc(buf_size, GFP_KERNEL);
+	char *buffer = kzalloc(buf_size, GFP_KERNEL);
 
 
 	PDEBUG("write %zu bytes with offset %lld", buf_size,*f_pos);
@@ -138,8 +138,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		retval = -ENOMEM;
 		goto clean_buf;
 	}
-
-	memset(buffer, 0, ksize(buffer));
+	PDEBUG("For short buffer allocated %zu bytes", ksize(buffer));
+	//memset(buffer, 0, ksize(buffer));
 
 	if (copy_from_user(buffer, buf, buf_size)){
 		retval = -EFAULT;
@@ -162,21 +162,23 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	retval = buf_size;
 
 
-	node = kmalloc(sizeof(qentry_node_t), GFP_KERNEL);
+	node = kzalloc(sizeof(qentry_node_t), GFP_KERNEL);
 	if (!node){
 		PDEBUG("Error allocate node");
 		retval = -ENOMEM;
 		goto clean_buf;
 	}
-	memset(node, 0, ksize(node));
+	PDEBUG("For node allocated %zu bytes", ksize(node));
+	//memset(node, 0, ksize(node));
 
-	node->entry = kmalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
+	node->entry = kzalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
 	if (!node->entry){
 		PDEBUG("Allocate entry");
 		retval = -ENOMEM;
 		goto clean_node;
 	}
-	memset(node->entry, 0, ksize(node->entry));
+	PDEBUG("For node->entry allocated %zu bytes", ksize(node->entry));
+	//memset(node->entry, 0, ksize(node->entry));
 
 	node->entry->buffptr = buffer;
 	node->entry->size = buf_size;
@@ -188,22 +190,24 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	// check can pass. Buffer should be cut at beginning of function
 	if (node->entry->buffptr[node->entry->size - 1] == '\n'){
 		PDEBUG("Make entry for circular buffer. New line symbol found");
-		full_cmd = kmalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
+		full_cmd = kzalloc(sizeof(aesd_buffer_entry_t), GFP_KERNEL);
 		if (!full_cmd){
 			PDEBUG("Error allocation entry for full command");
 			retval = -ENOMEM;
 			goto clean_entry;
 		}
-		memset(full_cmd, 0, ksize(full_cmd));
+		PDEBUG("For full command entry allocated %zu bytes", ksize(full_cmd));
+		//memset(full_cmd, 0, ksize(full_cmd));
 
-		full_buf = kmalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
+		full_buf = kzalloc((dev->queue_size + node->entry->size), GFP_KERNEL);
 		if (!full_buf){
 			retval = -ENOMEM;
 			PDEBUG("Error allocate full command buffer");
 			goto clean_full_cmd;
 		}
+		PDEBUG("For full command (long) buffer allocated %zu bytes", ksize(full_buf));
 		full_cmd->size = dev->queue_size + node->entry->size;
-		memset(full_buf, 0, ksize(full_cmd));
+		//memset(full_buf, 0, ksize(full_cmd));
 
 		packet = 1;
 	}
