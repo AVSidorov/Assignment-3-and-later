@@ -75,8 +75,7 @@ void exit_norm(void){
 //    if (fsync(file_fd) < 0)
 //        syslog(LOG_ERR, "%s: %m", "Error sync to disk before close");
 
-    if (close(file_fd) == -1)
-        syslog(LOG_ERR, "%s: %m", "Close file");
+
 
     pthread_mutex_destroy(&lock);
     exit(EXIT_SUCCESS);
@@ -150,6 +149,13 @@ void *process_connection(void *thread_data){
                 packet = 1;
             }
 
+            // Open file for timestamps and data
+            file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
+            if (file_fd < 0) {
+                syslog(LOG_ERR, "%s: %m", "Failed to open data file");
+                goto clean_thread;
+            }
+
             // Append the data to the file
             // TODO check error and partial write
             write(file_fd, &buffer, bytes_read);
@@ -200,19 +206,27 @@ void *process_connection(void *thread_data){
             goto clean_thread;
         }
 
+        if (close(file_fd) == -1)
+        syslog(LOG_ERR, "%s: %m", "Close file");
+
         memset(&buffer, 0, BUF_SIZE);
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
         packet = 0;
     }while(1);
 
+
     // unlock mutex and unblock signals
     clean_thread: if (packet){
-        lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
+        if(file_fd >=0)
+            lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
         packet=0;
+
     }
+
+
 
     // close client socket
     if (close(client_fd) == -1)
@@ -307,14 +321,6 @@ int main(int argc, char * argv[]){
     sigaddset(&block_set, SIGTERM);
 
 
-
-    // Open file for timestamps and data
-    file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
-    if (file_fd < 0) {
-        syslog(LOG_ERR, "%s: %m", "Failed to open data file");
-        goto cleanup_thr;
-    }
-
      // Set up the signal handler using sigaction
     struct sigaction sa_int, sa_term,sa_alrm;//, sa_io;
 
@@ -346,7 +352,7 @@ int main(int argc, char * argv[]){
      // Create socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0)) == -1){
         syslog(LOG_ERR, "%s: %m", "Failed to create socket");
-        goto cleanup_file;
+        goto cleanup_thread;
     }
 
 
@@ -451,10 +457,7 @@ int main(int argc, char * argv[]){
     cleanup_server: if (close(server_fd) == -1)
             syslog(LOG_ERR, "%s: %m", "Close server descriptor");
 
-    cleanup_file: if (close(file_fd) == -1)
-        syslog(LOG_ERR, "%s: %m", "Close file");
-
-    cleanup_thr: pthread_mutex_destroy(&lock);
+    cleanup_thread: pthread_mutex_destroy(&lock);
 
     err: return -1;
 
