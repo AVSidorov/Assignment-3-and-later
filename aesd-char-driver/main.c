@@ -61,12 +61,17 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
     aesd_buffer_entry_t *entry = NULL;
     size_t offs_entry; // for getting offset inside entry
-    size_t offs_full=*f_pos; //for avoiding "transfer" pointer and calculations
+    size_t offs_full; //for avoiding "transfer" pointer and calculations
 
 	PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
 	if (mutex_lock_interruptible(&dev->circ_buf_lock))
 		return -ERESTARTSYS;
+
+	if (f_pos)
+		offs_full = *f_pos;
+	else
+		offs_full = filp->f_pos;
 
 	entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, offs_full, &offs_entry);
 	if (!entry){ //Entry not found
@@ -99,8 +104,12 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 		goto out;
 	}
 
-	*f_pos += count;
-	offs_full = *f_pos; // for correct printk
+	offs_full += count; // for correct printk
+	*f_pos = offs_full; //
+	//filp -> f_pos = offs_full; //readp must don't change file position
+	// TODO changing fileposition in case of read call (file position should be changed)
+	// maybe it makes kernel
+
 	PDEBUG("New file position %zu ", offs_full);
 	PDEBUG("aesd_read returns %zu ", retval);
 	retval = count;
@@ -122,6 +131,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 	qentry_node_t *node = NULL;	//queue node, which points to short (working) entry to store in/get from queue
 	aesd_buffer_entry_t *full_cmd = NULL;	//long entry for adding to circular buffer
+	const aesd_buffer_entry_t *del_cmd;	//for temporary save entry that will be deleted
 
 	char *full_buf = NULL; // buffer to collect full command
 	void *del_buf = NULL; // to save pointer to free memory
@@ -250,6 +260,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		PDEBUG("From queue to circular buffer");
 		pos = full_buf;
 
+		// Make full command from queue
 		while(!STAILQ_EMPTY(&dev->queue)){
 			node = STAILQ_FIRST(&dev->queue);
 			STAILQ_REMOVE_HEAD(&dev->queue, next);
@@ -274,18 +285,25 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
 		if (mutex_lock_interruptible(&dev->circ_buf_lock)){
 			PDEBUG("Error lock circular buffer for write full command");
-			return -ERESTARTSYS;
+			retval = -ERESTARTSYS;
 			goto clean_full_buffptr;
 		}
 
 		PDEBUG("Add to circular buffer %s", full_buf);
-		// We need free memory from first command in buffer
-		if (dev->circ_buf.full)
-			del_buf = (void *)(aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL)->buffptr);
+
+		if (dev->circ_buf.full){
+			// We need free memory from first command in buffer
+			del_cmd = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buf, 0, NULL);
+			del_buf = (void *)(del_cmd->buffptr);
+			// reduce full size of buffer
+			dev->circ_buf_size -= del_cmd->size;
+		}
 
 		PDEBUG("Save command in buf at %p", full_buf);
 		full_cmd->buffptr = full_buf;
 		aesd_circular_buffer_add_entry(&dev->circ_buf, full_cmd);
+		// add to full size length of new command
+		dev->circ_buf_size += full_cmd->size;
 
 		// data from full_cmd copied to circular buf
 		// here free full_cmd
@@ -319,12 +337,27 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	return retval;
 }
 
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence){
+	struct aesd_dev *dev = filp->private_data;
+	loff_t offs;
+	PDEBUG("Seek to %lld. relative %d", offset, whence);
+	if (mutex_lock_interruptible(&dev->circ_buf_lock)){
+		PDEBUG("Error lock for seek");
+		return -ERESTARTSYS;
+	}
+	offs = fixed_size_llseek(filp, offset, whence,dev->circ_buf_size);
+	PDEBUG("seek returns %lld. File->pos is %lld", offs, filp->f_pos);
+	mutex_unlock(&dev->circ_buf_lock);
+	return offs;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =   aesd_llseek,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
@@ -360,6 +393,7 @@ int aesd_init_module(void)
      * TODO: initialize the AESD specific portion of the device
      */
 	aesd_circular_buffer_init(&aesd_device.circ_buf);
+	// aesd_device.circ_buf_size = 0; should be after memset
 	mutex_init(&aesd_device.circ_buf_lock);
 
 	STAILQ_INIT(&aesd_device.queue);
