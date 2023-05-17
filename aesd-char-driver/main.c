@@ -384,7 +384,7 @@ static long aesd_adjust_file_offset(struct file *filp, uint32_t write_cmd, uint3
 		}
 	}
 
-	if (i < write_cmd-1){
+	if (i < write_cmd){
 		PDEBUG("Not enough commands written");
 		return -EINVAL;
 	}

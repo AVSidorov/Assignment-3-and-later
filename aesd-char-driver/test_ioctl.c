@@ -18,9 +18,11 @@ int main(int argc, char* argv[]){
 	if (argc<3)
 		write_cmd_offset = 0;
 	else
-		write_cmd = atoi(argv[2]);
+		write_cmd_offset = atoi(argv[2]);
 
 	struct aesd_seekto seekto = {write_cmd, write_cmd_offset};
+
+	printf("set to command %d offset %d", seekto.write_cmd, seekto.write_cmd_offset);
 
 	char buf[BUF_SIZE] ;
 	int fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
