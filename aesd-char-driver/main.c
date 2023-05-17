@@ -66,7 +66,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     size_t offs_entry; // for getting offset inside entry
     size_t offs_full; //for avoiding "transfer" pointer and calculations
 
-	PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
+	PDEBUG("Read %zu bytes with offset %lld",count,*f_pos);
 
 	if (mutex_lock_interruptible(&dev->circ_buf_lock))
 		return -ERESTARTSYS;
@@ -85,7 +85,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
 	/* Calculate size to return. Return no more than one command (till end entry buffer)*/
 	if ((entry->size - offs_entry) < count){
-		PDEBUG("Reduce out count. Till end of entry buffer (end of command)");
+		PDEBUG("reduce out count. Till end of entry buffer (end of command)");
 		count = entry->size - offs_entry;
 	}
 
@@ -96,7 +96,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	PDEBUG("%s will be copied to user", pos);
 
 	if (!pos){
-		PDEBUG("Buffer is NULL");
+		PDEBUG("buffer is NULL");
 		goto out;
 	}
 
@@ -114,11 +114,12 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	// maybe it makes kernel
 
 	retval = count;
-	PDEBUG("New file position %zu ", offs_full);
-	PDEBUG("aesd_read returns %zu ", retval);
+	PDEBUG("new value of f_pos arg is %zu ", offs_full);
+
 
 
 	out: mutex_unlock(&dev->circ_buf_lock);
+	PDEBUG("aesd_read returns %zu ", retval);
 	return retval;
 }
 
