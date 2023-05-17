@@ -113,9 +113,10 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 	// TODO changing fileposition in case of read call (file position should be changed)
 	// maybe it makes kernel
 
+	retval = count;
 	PDEBUG("New file position %zu ", offs_full);
 	PDEBUG("aesd_read returns %zu ", retval);
-	retval = count;
+
 
 	out: mutex_unlock(&dev->circ_buf_lock);
 	return retval;

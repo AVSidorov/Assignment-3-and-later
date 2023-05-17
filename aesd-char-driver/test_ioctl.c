@@ -22,13 +22,17 @@ int main(int argc, char* argv[]){
 
 	struct aesd_seekto seekto = {write_cmd, write_cmd_offset};
 
-	printf("set to command %d offset %d", seekto.write_cmd, seekto.write_cmd_offset);
+	printf("set to command %d offset %d\n", seekto.write_cmd, seekto.write_cmd_offset);
 
 	char buf[BUF_SIZE] ;
 	int fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
-	ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto);
-	while (read(fd, &buf, BUF_SIZE)){
-		printf("%s", buf);
-	}
+
+	if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) == 0)
+		while (read(fd, &buf, BUF_SIZE)){
+			printf("%s", buf);
+		}
+	else
+		printf("ioctl error\n");
+
 	close(fd);
 }
