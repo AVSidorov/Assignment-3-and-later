@@ -21,7 +21,10 @@
 #include <linux/fs.h> // file_operations
 #include <linux/uaccess.h>	/* copy_*_user */
 #include <linux/slab.h>		/* kmalloc() */
+#include <linux/fcntl.h>	/* O_ACCMODE */
+
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
@@ -351,6 +354,89 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence){
 	return offs;
 }
 
+static long aesd_adjust_file_offset(struct file *filp, uint32_t write_cmd, uint32_t write_cmd_offset){
+	struct aesd_dev *dev = filp->private_data;
+	struct aesd_circular_buffer *circ_buf = &(dev->circ_buf);
+	struct aesd_buffer_entry *entry = NULL;
+	size_t full_offs = 0;
+	uint8_t i=0;
+	long retval=0;
+
+	PDEBUG("Adjust file offset with command %d, offset %d", write_cmd, write_cmd_offset);
+
+	if (write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED){
+		PDEBUG("write command number to large");
+		return -EINVAL;
+	}
+
+	//make f_pos base from command number
+	for ( i = 0; i <= write_cmd; i ++){
+		entry = AESD_CIRCULAR_BUFFER_GET_ENTRY(circ_buf, i);
+		if (entry){
+			if (entry->buffptr)
+				full_offs += entry->size;
+			else
+				break;
+		}
+		else{
+			break;
+		}
+	}
+
+	if (i < write_cmd){
+		PDEBUG("Not enough commands written");
+		return -EINVAL;
+	}
+
+	if (write_cmd_offset >= entry -> size){
+		PDEBUG("Offset in command larger then command size");
+		return -EINVAL;
+	}
+
+	full_offs += write_cmd;
+	retval = aesd_llseek(filp, full_offs,SEEK_SET);
+
+	if (retval != full_offs)
+		return retval;
+
+	return 0;
+}
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+	int retval = -EFAULT;
+
+	PDEBUG("ioctl called");
+	/*
+	 * extract the type and number bitfields, and don't decode
+	 * wrong cmds: return ENOTTY (inappropriate ioctl) before access_ok()
+	 */
+	if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC){
+		PDEBUG("Wrong IOC_MAGIC in command");
+		return -ENOTTY;
+	}
+
+	switch (cmd){
+		case AESDCHAR_IOCSEEKTO:
+		{
+			struct aesd_seekto seekto;
+			if (!access_ok((void __user *) arg, sizeof(seekto))){
+				PDEBUG("Error access to user space");
+				return -EFAULT;
+			}
+			if (copy_from_user(&seekto, (const void __user *) arg, sizeof(seekto))){
+				retval = -EFAULT;
+			} else{
+				retval = aesd_adjust_file_offset(filp, seekto.write_cmd,seekto.write_cmd_offset);
+			}
+			break;
+		}
+		default:
+			retval = -ENOTTY;
+	}
+
+	return retval;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
@@ -358,6 +444,7 @@ struct file_operations aesd_fops = {
     .open =     aesd_open,
     .release =  aesd_release,
     .llseek =   aesd_llseek,
+    .unlocked_ioctl = aesd_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)

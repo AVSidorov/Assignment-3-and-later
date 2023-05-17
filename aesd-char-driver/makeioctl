@@ -1,0 +1,22 @@
+CC = gcc
+CFLAGS= -g -O0
+LDFLAGS= -g
+
+
+EXECUTABLE=test_ioctl
+SOURCES=$(EXECUTABLE).c
+OBJECTS=$(SOURCES:.c=.o)
+
+CROSS_COMPILE=
+     
+all: $(EXECUTABLE)
+
+$(EXECUTABLE): $(OBJECTS)
+	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+
+$(OBJECTS): $(SOURCES)
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $^
+
+
+clean:
+	rm -f $(EXECUTABLE) $(OBJECTS)
