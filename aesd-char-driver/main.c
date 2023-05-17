@@ -370,7 +370,8 @@ static long aesd_adjust_file_offset(struct file *filp, uint32_t write_cmd, uint3
 	}
 
 	//make f_pos base from command number
-	for ( i = 0; i <= write_cmd; i ++){
+	//collect from previous commands
+	for ( i = 0; i < write_cmd; i ++){
 		entry = AESD_CIRCULAR_BUFFER_GET_ENTRY(circ_buf, i);
 		if (entry){
 			if (entry->buffptr)
@@ -383,7 +384,16 @@ static long aesd_adjust_file_offset(struct file *filp, uint32_t write_cmd, uint3
 		}
 	}
 
-	if (i < write_cmd){
+	if (i < write_cmd-1){
+		PDEBUG("Not enough commands written");
+		return -EINVAL;
+	}
+
+	entry = AESD_CIRCULAR_BUFFER_GET_ENTRY(circ_buf, write_cmd);
+
+	// entry is static as part of global device structure ( aesd_device.circ_buf.entry[write_cmd])
+	// so check for NULL is not necessary
+	if (!entry->buffptr){
 		PDEBUG("Not enough commands written");
 		return -EINVAL;
 	}
@@ -393,7 +403,7 @@ static long aesd_adjust_file_offset(struct file *filp, uint32_t write_cmd, uint3
 		return -EINVAL;
 	}
 
-	full_offs += write_cmd;
+	full_offs += write_cmd_offset;
 	retval = aesd_llseek(filp, full_offs,SEEK_SET);
 
 	if (retval != full_offs)
