@@ -11,12 +11,16 @@
 #include <time.h>
 #include <pthread.h>
 #include "./queue.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #define PORT 9000
 #define MAX_CLIENTS 5
 #define BUF_SIZE 1024
 #define FILENAME "/dev/aesdchar"
 #define KEEPALIVE 10
+
+#define AESDCHAR_IOCSEEKTO_CMD "AESDCHAR_IOCSEEKTO:"
+#define AESDCHAR_IOCSEEKTO_CMD_SIZE sizeof(AESDCHAR_IOCSEEKTO_CMD)/sizeof(char)-1
 
 static volatile int running = 1;
 static volatile int wait_connection = 0;
@@ -44,6 +48,58 @@ SLIST_HEAD(slisthead, clt_lst_s) head;
 * Service Functions
 *
 *****************************************************/
+/*!
+ * @param buf received bytes
+ * @param count number of received bytes
+ * @param cmd_buf buffer for storing command
+ * @param cmd_length lenght of stored command part
+ */
+size_t check_cmd(char *buf, size_t count, char *cmd_buf, size_t cmd_length){
+    const char *cmd = AESDCHAR_IOCSEEKTO_CMD;
+    const size_t cmd_size= strlen(cmd);
+
+    size_t compare_count=cmd_length+count;
+
+    // add new data to command buffer
+    memcpy(cmd_buf+cmd_length, buf, count);
+    cmd_length += count;
+
+    //adjust number of bytes for checking
+    compare_count = compare_count > cmd_size ? cmd_size : compare_count;
+
+    // compare first part of command
+    if (strncmp(cmd, cmd_buf, compare_count)){
+    // clean command buffer in case of missmatch
+        memset(cmd_buf, 0 ,BUF_SIZE);
+        return 0;
+    }
+    return cmd_length;
+}
+
+int make_cmd(char *cmd_buf, size_t cmd_length, struct aesd_seekto *seekto){
+    if (!strchr(cmd_buf,'\n'))
+        return 1;
+
+    char *rest=cmd_buf + AESDCHAR_IOCSEEKTO_CMD_SIZE;
+
+    char *token = strtok_r(cmd_buf+AESDCHAR_IOCSEEKTO_CMD_SIZE, ",", &rest);
+
+    if (token)
+        seekto->write_cmd = atoi(token);
+    else
+        return 2;
+
+    strtok_r(NULL, ",", &rest);
+
+    if (token)
+        seekto->write_cmd_offset = atoi(token);
+    else
+        return 3;
+
+    return 0;
+}
+
+
 void cleanup_threads(void){
 
     clt_lst_t *node=NULL;
@@ -132,6 +188,12 @@ void *process_connection(void *thread_data){
     char buffer[BUF_SIZE];
     memset(&buffer, 0, BUF_SIZE);
 
+    char cmd_buf[BUF_SIZE];
+    size_t cmd_size = 0;
+    memset(&cmd_buf, 0, BUF_SIZE);
+    struct aesd_seekto seekto;
+    memset(&seekto, 0, sizeof(seekto));
+
     sigset_t old_set;
     sigemptyset(&old_set);
 
@@ -142,30 +204,52 @@ void *process_connection(void *thread_data){
     // Exit from loop to label in case error or closed connection
     do{
         while ( (bytes_read = recv(client_fd, buffer, BUF_SIZE, 0)) > 0) {
-            // Lock mutex and block signals if new packet
+            // Lock mutex, open file and block signals if new packet
             if (!packet){
                 sigprocmask(SIG_BLOCK, &block_set, &old_set);
-                pthread_mutex_lock(&lock);
+                if (pthread_mutex_lock(&lock)){
+                    syslog(LOG_ERR, "%s: %m", "Failed to lock mutex");
+                    goto clean_thread;
+                }
+
                 packet = 1;
+                cmd_size = 0;
+                // Open file for timestamps and data
+                file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
+                if (file_fd < 0) {
+                    syslog(LOG_ERR, "%s: %m", "Failed to open data file");
+                    goto clean_thread;
+                }
             }
-
-            // Open file for timestamps and data
-            file_fd = open(FILENAME, O_CREAT | O_RDWR | O_APPEND | O_TRUNC | O_SYNC, 0644);
-            if (file_fd < 0) {
-                syslog(LOG_ERR, "%s: %m", "Failed to open data file");
-                goto clean_thread;
-            }
-
-            // Append the data to the file
-            // TODO check error and partial write
-            write(file_fd, &buffer, bytes_read);
-
-//            // ensure that data on disk
-//            if (fsync(file_fd) < 0)
-//                syslog(LOG_ERR, "%s: %m", "Error sync packet to disk");
 
             syslog(LOG_DEBUG,"received %ld bytes", bytes_read);
             syslog(LOG_DEBUG,"received %s", buffer);
+
+            if ((cmd_size=check_cmd(buffer, bytes_read, cmd_buf, cmd_size))){
+                switch(make_cmd(cmd_buf, cmd_size,&seekto)){
+                case 0:
+                    syslog(LOG_DEBUG,"set circular buffer to command %d offset %d\n", seekto.write_cmd, seekto.write_cmd_offset);
+                    if (ioctl(file_fd, AESDCHAR_IOCSEEKTO, &seekto))
+                        syslog(LOG_ERR, "%s: %m", "ioctl error");
+                    memset(&cmd_buf, 0, BUF_SIZE);
+                    cmd_size = 0;
+                    memset(&seekto, 0, sizeof(seekto));
+                 case 1:
+                    syslog(LOG_DEBUG,"Not full command");
+                 case 2:
+                    syslog(LOG_ERR, "%s", "write_cmd not found");
+                 case 3:
+                    syslog(LOG_ERR, "%s", "write_cmd_offset not found");
+                 }
+            }
+            else{
+                write(file_fd, &buffer, bytes_read);
+            }
+
+
+            // Append the data to the file
+            // TODO check error and partial write
+
 
             // if full packet received go to response (send)
             if (buffer[bytes_read-1] == '\n'){
@@ -188,10 +272,8 @@ void *process_connection(void *thread_data){
 
 
         int bytes_send;
-        off_t file_pos=0;
 
-        while ((bytes_read = pread(file_fd, &buffer, BUF_SIZE, file_pos)) > 0){
-            file_pos += bytes_read;
+        while ((bytes_read = read(file_fd, &buffer, BUF_SIZE)) > 0){
             // TODO check error and partial send
             if ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
                 syslog(LOG_ERR, "%s: %m", "Fail send");
@@ -199,6 +281,7 @@ void *process_connection(void *thread_data){
             }
             syslog(LOG_DEBUG,"read  %ld bytes", bytes_read);
             syslog(LOG_DEBUG,"send %d bytes", bytes_send);
+            memset(&buffer, 0, BUF_SIZE);
         }
 
         if (bytes_read == -1){
@@ -207,12 +290,15 @@ void *process_connection(void *thread_data){
         }
 
         if (close(file_fd) == -1)
-        syslog(LOG_ERR, "%s: %m", "Close file");
+            syslog(LOG_ERR, "%s: %m", "Close file");
 
         memset(&buffer, 0, BUF_SIZE);
+
+
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
         packet = 0;
+
     }while(1);
 
 
