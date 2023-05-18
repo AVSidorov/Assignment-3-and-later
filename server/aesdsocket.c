@@ -227,19 +227,17 @@ void *process_connection(void *thread_data){
 
             if ((cmd_size=check_cmd(buffer, bytes_read, cmd_buf, cmd_size))){
                 switch(make_cmd(cmd_buf, cmd_size,&seekto)){
-                case 0:
+                case 0:{
                     syslog(LOG_DEBUG,"set circular buffer to command %d offset %d\n", seekto.write_cmd, seekto.write_cmd_offset);
                     if (ioctl(file_fd, AESDCHAR_IOCSEEKTO, &seekto))
                         syslog(LOG_ERR, "%s: %m", "ioctl error");
                     memset(&cmd_buf, 0, BUF_SIZE);
                     cmd_size = 0;
                     memset(&seekto, 0, sizeof(seekto));
-                 case 1:
-                    syslog(LOG_DEBUG,"Not full command");
-                 case 2:
-                    syslog(LOG_ERR, "%s", "write_cmd not found");
-                 case 3:
-                    syslog(LOG_ERR, "%s", "write_cmd_offset not found");
+                 }
+                 case 1: syslog(LOG_DEBUG,"Not full command");
+                 case 2: syslog(LOG_ERR, "%s", "write_cmd not found");
+                 case 3: syslog(LOG_ERR, "%s", "write_cmd_offset not found");
                  }
             }
             else{
@@ -272,7 +270,7 @@ void *process_connection(void *thread_data){
 
 
         int bytes_send;
-
+        // read using current file_pos
         while ((bytes_read = read(file_fd, &buffer, BUF_SIZE)) > 0){
             // TODO check error and partial send
             if ((bytes_send = send(client_fd, &buffer, bytes_read, 0)) < bytes_read){
@@ -305,7 +303,7 @@ void *process_connection(void *thread_data){
     // unlock mutex and unblock signals
     clean_thread: if (packet){
         if(file_fd >=0)
-            lseek(file_fd, (off_t) 0, SEEK_END); // try to seek to end of file here error check have no sense
+            lseek(file_fd, (off_t) 0, SEEK_SET); // try to seek to end of file here error check have no sense
         pthread_mutex_unlock(&lock);
         sigprocmask(SIG_SETMASK, &old_set, NULL);
         packet=0;
