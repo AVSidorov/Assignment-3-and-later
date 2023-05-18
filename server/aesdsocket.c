@@ -77,10 +77,12 @@ size_t check_cmd(char *buf, size_t count, char *cmd_buf, size_t cmd_length){
 }
 
 int make_cmd(char *cmd_buf, size_t cmd_length, struct aesd_seekto *seekto){
+    syslog(LOG_DEBUG,"cmd_buf %s", cmd_buf);
     if (!strchr(cmd_buf,'\n'))
         return 1;
 
     char *rest=cmd_buf + AESDCHAR_IOCSEEKTO_CMD_SIZE;
+    syslog(LOG_DEBUG,"start tokenize in %s", rest);
 
     char *token = strtok_r(cmd_buf+AESDCHAR_IOCSEEKTO_CMD_SIZE, ",", &rest);
 
@@ -88,6 +90,7 @@ int make_cmd(char *cmd_buf, size_t cmd_length, struct aesd_seekto *seekto){
         seekto->write_cmd = atoi(token);
     else
         return 2;
+    syslog(LOG_DEBUG,"write_cmd token %s", token);
 
     strtok_r(NULL, ",", &rest);
 
@@ -95,6 +98,7 @@ int make_cmd(char *cmd_buf, size_t cmd_length, struct aesd_seekto *seekto){
         seekto->write_cmd_offset = atoi(token);
     else
         return 3;
+    syslog(LOG_DEBUG,"write_cmd_offset token %s", token);
 
     return 0;
 }
@@ -226,6 +230,7 @@ void *process_connection(void *thread_data){
             syslog(LOG_DEBUG,"received %s", buffer);
 
             if ((cmd_size=check_cmd(buffer, bytes_read, cmd_buf, cmd_size))){
+                syslog(LOG_DEBUG,"cmd_size %lu cmd_buf %s", cmd_size, cmd_buf);
                 switch(make_cmd(cmd_buf, cmd_size,&seekto)){
                 case 0:{
                     syslog(LOG_DEBUG,"set circular buffer to command %d offset %d\n", seekto.write_cmd, seekto.write_cmd_offset);
