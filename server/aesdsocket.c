@@ -92,7 +92,7 @@ int make_cmd(char *cmd_buf, size_t cmd_length, struct aesd_seekto *seekto){
         return 2;
     syslog(LOG_DEBUG,"write_cmd token %s", token);
 
-    strtok_r(NULL, ",", &rest);
+    token=strtok_r(NULL, ",", &rest);
 
     if (token)
         seekto->write_cmd_offset = atoi(token);
@@ -258,6 +258,8 @@ void *process_connection(void *thread_data){
             if (buffer[bytes_read-1] == '\n'){
                 break;
             }
+            else
+                syslog(LOG_DEBUG, "packet not full");
         }
 
         // Error read from socket
